@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Media {
+  id                     String         @id @default(uuid())
+  anilistId              Int            @unique
+  title                  String
+  type                   String         // MANGA | MANHWA
+  coverImage             String
+  totalChapters          Int
+  chapterNumberingSource String         // "official_en" | "raw_kr" | "scanlation" etc.
+  countryOfOrigin        String
+  characters             Character[]
+  relationships          Relationship[]
+  factions               Faction[]
+  createdAt              DateTime       @default(now())
+}
+
+model Character {
+  id                  String                 @id @default(uuid())
+  mediaId             String
+  media               Media                  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  name                String
+  aliases             String[]               // alternative names for Name Resolution (4.C step 4)
+  imageUrl            String
+  introducedAtChapter Int
+  descriptions        CharacterDescription[]
+  statuses            CharacterStatus[]
+  factionMemberships  FactionMembership[]
+  sourceRelations     Relationship[]         @relation("SourceCharacter")
+  targetRelations     Relationship[]         @relation("TargetCharacter")
+
+  @@index([mediaId, introducedAtChapter])
+}
+
+model CharacterDescription {
+  id          String    @id @default(uuid())
+  characterId String
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  text        String
+  validFrom   Int
+  validUntil  Int?
+  isSensitive Boolean   @default(true)
+  createdAt   DateTime  @default(now()) // tie-break for deterministic ordering (4.A)
+
+  @@index([characterId, validFrom, validUntil])
+}
+
+model CharacterStatus {
+  id          String    @id @default(uuid())
+  characterId String
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  status      String    // Alive | Deceased | Imprisoned | MIA | Unknown | etc
+  validFrom   Int
+  validUntil  Int?
+  isSensitive Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  @@index([characterId, validFrom, validUntil])
+}
+
+model Faction {
+  id                  String              @id @default(uuid())
+  mediaId             String
+  media               Media               @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  name                String
+  colorHex            String?
+  introducedAtChapter Int                 @default(1) // faction not sent to frontend if N < this
+  memberships         FactionMembership[]
+
+  @@index([mediaId, introducedAtChapter])
+}
+
+model FactionMembership {
+  id          String    @id @default(uuid())
+  factionId   String
+  faction     Faction   @relation(fields: [factionId], references: [id], onDelete: Cascade)
+  characterId String
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  validFrom   Int
+  validUntil  Int?
+  isSensitive Boolean   @default(false)
+
+  @@index([characterId, validFrom, validUntil])
+  @@index([factionId, validFrom, validUntil])
+}
+
+model Relationship {
+  id                String    @id @default(uuid())
+  mediaId           String
+  media             Media     @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sourceCharacterId String
+  sourceCharacter   Character @relation("SourceCharacter", fields: [sourceCharacterId], references: [id], onDelete: Cascade)
+  targetCharacterId String
+  targetCharacter   Character @relation("TargetCharacter", fields: [targetCharacterId], references: [id], onDelete: Cascade)
+  relationType      String    // "Ally" | "Enemy" | "Secret Sibling" | etc
+  validFrom         Int
+  validUntil        Int?
+  isSensitive       Boolean   @default(true)
+
+  @@index([mediaId, validFrom, validUntil])
+}
+
+model DraftIngestion {
+  id              String    @id @default(uuid())
+  mediaId         String
+  characterName   String
+  rawWikitext     String?
+  parsedJson      Json      // Gemini output, includes isSensitive per item
+  status          String    @default("PENDING") // PENDING | UNRESOLVED | APPROVED | REJECTED
+  unresolvedNames String[]  @default([])        // targetName that failed Name Resolution
+  reviewedAt      DateTime?                     // idempotency guard: reject approve if already set
+  createdAt       DateTime  @default(now())
+
+  @@index([mediaId, status])
+}
