@@ -13,7 +13,7 @@
 ## ✨ Fitur Utama
 
 | Fitur | Deskripsi |
-|-------|-----------|
+| ------- | ----------- |
 | **Peta Relasi Bebas Spoiler** | Graf hubungan antar-karakter yang difilter presisi berdasarkan posisi *chapter slider* — data `validFrom > N` tidak pernah dikirim ke client |
 | **Two-Layer Spoiler System** | Layer 1 (chapter filter) di backend menjamin keamanan struktural; Layer 2 (`isSensitive` toggle) memberi kontrol UX tambahan |
 | **Temporal Graph** | Relasi, status, deskripsi, dan keanggotaan faksi berubah sesuai progress bab — mendukung karakter yang mati, berganti faksi, atau berubah aliansi |
@@ -26,7 +26,7 @@
 ## 🏗️ Tech Stack
 
 | Layer | Teknologi |
-|-------|-----------|
+| ------- | ----------- |
 | **Frontend** | Next.js 16, React 19, TypeScript 5, Tailwind CSS 4, Cytoscape.js |
 | **Backend** | Next.js Server Actions & API Routes |
 | **Database** | PostgreSQL + Prisma ORM 7 |
@@ -38,7 +38,7 @@
 ## 📁 Struktur Proyek
 
 ```
-spoiler-free-map/
+constella/
 ├── prisma/
 │   ├── migrations/          # Database migrations
 │   ├── schema.prisma        # Data model (temporal entities)
@@ -102,7 +102,7 @@ cp .env.example .env
 ```
 
 | Variable | Deskripsi |
-|----------|-----------|
+| ---------- | ----------- |
 | `DATABASE_URL` | Connection string PostgreSQL |
 | `GEMINI_API_KEY` | Google Gemini API key ([dapatkan di sini](https://aistudio.google.com/app/apikey)) |
 | `GEMINI_MODEL` | Model Gemini yang digunakan (mendukung fallback chain, pisahkan dengan koma) |
@@ -143,7 +143,7 @@ Buka [http://localhost:3000](http://localhost:3000) di browser.
 ### Admin API
 
 | Method | Endpoint | Deskripsi |
-|--------|----------|-----------|
+| -------- | ---------- | ----------- |
 | `POST` | `/api/admin/ingest` | Memulai ingestion pipeline (AniList → Fandom → Gemini) |
 | `GET` | `/api/admin/review` | Mengambil daftar draft untuk di-review |
 | `POST` | `/api/admin/review/approve` | Approve draft dan pindahkan ke tabel aktif |
@@ -183,6 +183,7 @@ npx tsx tests/graph.test.ts
 ```
 
 Test mencakup:
+
 - ✅ Tidak ada item dengan `validFrom > N` di response
 - ✅ Tidak ada edge menggantung (dangling edges)
 - ✅ Tidak ada metadata temporal di payload publik
@@ -193,7 +194,7 @@ Test mencakup:
 ## 🛠️ Scripts
 
 | Script | Deskripsi |
-|--------|-----------|
+| -------- | ----------- |
 | `npm run dev` | Jalankan development server |
 | `npm run build` | Build production bundle |
 | `npm run lint` | Jalankan ESLint |
