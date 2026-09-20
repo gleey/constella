@@ -1,208 +1,291 @@
-# 🗺️ Spoiler-Free Dynamic Character & Story Map
+# ✨ Constella — Spoiler-Free Dynamic Character & Story Map
 
-> Platform web interaktif yang menyajikan peta relasi karakter manga/manhwa berbasis *temporal graph* — visualisasi berubah otomatis sesuai bab yang sedang dibaca, **tanpa membocorkan jalan cerita**.
+> Platform web interaktif berbasis *temporal graph* yang menyajikan peta relasi karakter komik/novel (manga/manhwa) secara dinamis sesuai bab (*chapter*) terakhir yang dibaca pengguna — **menjamin zero-spoiler** tanpa risiko kebocoran alur cerita.
 
-![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![Next.js](https://img.shields.io/badge/Next.js-16.3-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![Prisma](https://img.shields.io/badge/Prisma-7-2D3748?logo=prisma)
+![Prisma](https://img.shields.io/badge/Prisma-7.10-2D3748?logo=prisma)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)
+![Cytoscape.js](https://img.shields.io/badge/Cytoscape.js-3.34-FF6B6B?logo=javascript)
+![Gemini AI](https://img.shields.io/badge/Google_Gemini-2.23-4285F4?logo=google)
+
+---
+
+## 🌌 Tentang Constella
+
+Membaca serial manga/manhwa berdurasi panjang (seperti *Tower of God*, *Omniscient Reader's Viewpoint*, *Solo Leveling*, atau *The Beginning After the End*) sering kali membingungkan karena banyaknya karakter, perubahan aliansi faksi, atau kematian tokoh penting. Membuka situs wiki publik sering kali langsung merusak pengalaman membaca karena spoiler karakter di bab mendatang.
+
+**Constella** (*Constellation of Characters*) memetakan hubungan antar-karakter layaknya rasi bintang:
+- Hubungan, afiliasi, faksi, dan status kehidupan karakter **hanya menyala dan berubah** sesuai posisi *chapter slider* yang dipilih.
+- Informasi temporal di masa depan tidak pernah dikirim ke browser pengguna.
+- Dilengkapi sistem otomatisasi katalog dari **AniList GraphQL**, ekstraksi wikitext **Fandom MediaWiki**, serta pemrosesan terstruktur menggunakan **Google Gemini API** & **Groq API Fallback**.
 
 ---
 
 ## ✨ Fitur Utama
 
 | Fitur | Deskripsi |
-| ------- | ----------- |
-| **Peta Relasi Bebas Spoiler** | Graf hubungan antar-karakter yang difilter presisi berdasarkan posisi *chapter slider* — data `validFrom > N` tidak pernah dikirim ke client |
-| **Two-Layer Spoiler System** | Layer 1 (chapter filter) di backend menjamin keamanan struktural; Layer 2 (`isSensitive` toggle) memberi kontrol UX tambahan |
-| **Temporal Graph** | Relasi, status, deskripsi, dan keanggotaan faksi berubah sesuai progress bab — mendukung karakter yang mati, berganti faksi, atau berubah aliansi |
-| **Hybrid AI Ingestion** | Pipeline AniList → Fandom scraping → Gemini API extraction dengan admin review sebelum publikasi |
-| **Name Resolution** | Pencocokan otomatis nama karakter dari output LLM ke database, dengan fallback manual untuk nama yang ambigu |
-| **Graph Layout Persistence** | Node yang sudah ada tetap di posisinya saat slider digeser — hanya node baru yang di-layout ulang |
+|---|---|
+| **Zero-Spoiler Temporal Graph** | Node (karakter), edge (relasi), status, dan faksi disaring ketat di level database PostgreSQL. Data dengan `validFrom > N` **dijamin tidak pernah dikirim** ke client. |
+| **Two-Layer Protection System** | **Layer 1:** Filter keamanan chapter di backend (non-negotiable).<br>**Layer 2:** UI `isSensitive` Spoiler-Toggle (konten penting/twist disembunyikan di balik klik tombol reveal). |
+| **Intelligent Graph Canvas** | Visualisasi graf relasi interaktif berbasis **Cytoscape.js** dengan: <br>• *Compound Faction Bubbles* dengan layout orbit radial mengelilingi tokoh utama (MC).<br>• *Concentric layout* otomatis untuk karakter independen.<br>• *Position coordinate persistence* (posisi node tidak teracak ulang saat slider digeser). |
+| **Multi-Tier Ingestion Engine** | Pipeline bertingkat untuk mengisi database:<br>• **Tier 1:** Bulk seeder populer dari AniList API (cepat, tanpa kuota AI).<br>• **Tier 2:** Scraper kategori Fandom dengan paginasi dan filter subpage otomatis.<br>• **Tier 3:** AI Structured Lore Extraction (Gemini SDK dengan skema JSON asli). |
+| **Resilient AI Fallback Chain** | Mendukung rantai multi-model Gemini (`gemini-3.5-flash`, `gemini-3.5-flash-lite`, dll.) serta otomatis beralih ke **Groq API** (`openai/gpt-oss-120b`, `llama-3.3-70b-versatile`) jika terjadi limit TPM/429. |
+| **Name Resolution & Deduplication** | Algoritma pencocokan nama otomatis (*case-insensitive, alias matching, romanization deduplication*) untuk memetakan nama hasil ekstraksi LLM ke tabel karakter, lengkap dengan status antrean `UNRESOLVED` untuk verifikasi admin. |
+| **Admin CMS & Review Workflow** | Panel admin interaktif di `/admin` dan `/admin/review` untuk memvalidasi draft, mengoreksi timeline bab, mengubah status sensitivitas per entri, serta menyinkronkan data secara background daemon. |
 
 ---
 
-## 🏗️ Tech Stack
+## 🏗️ Arsitektur Sistem
 
-| Layer | Teknologi |
-| ------- | ----------- |
-| **Frontend** | Next.js 16, React 19, TypeScript 5, Tailwind CSS 4, Cytoscape.js |
-| **Backend** | Next.js Server Actions & API Routes |
-| **Database** | PostgreSQL + Prisma ORM 7 |
-| **AI/LLM** | Google Gemini API (`@google/genai`), Groq API (fallback) |
-| **External API** | AniList GraphQL API, Fandom MediaWiki API |
+### 1. Zero-Spoiler Two-Layer Security Model
+
+```
+Pengguna menggeser slider ke Bab N
+                 │
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│  Layer 1: Chapter Scoping (Database / Backend — Non-Negotiable)         │
+│  ────────────────────────────────────────────────────────────────────  │
+│  • WHERE validFrom <= N AND (validUntil > N OR validUntil IS NULL)     │
+│  • Validasi dua sisi: Relasi dibuang jika source/target belum muncul   │
+│  • Faction Membership mengikuti validitas kemunculan Faksi             │
+│  • Metadata temporal (validFrom, validUntil) TIDAK PERNAH dikirim       │
+└────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼ (Hanya data aktif bab N yang lolos)
+┌────────────────────────────────────────────────────────────────────────┐
+│  Layer 2: Sensitivity UI Layer (Frontend — UX Control)                 │
+│  ────────────────────────────────────────────────────────────────────  │
+│  • isSensitive: true dirender tertutup: [Spoiler ▼]                    │
+│  • Klik eksplisit untuk expand (▲)                                     │
+│  • Label hover pada edge sensitif dibuat generik ("Connected")         │
+│  • State reveal OTOMATIS DI-RESET setiap slider chapter bergeser       │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Aturan Temporal Universal (Database Contract)
+
+* `validFrom` = Bab pertama di mana fakta/relasi ini **mulai berlaku** (inklusif).
+* `validUntil` = Bab pertama di mana fakta/relasi ini **sudah TIDAK berlaku** (eksklusif). Nilai `null` = berlaku seterusnya.
+* *Contoh Kematian:* Bab 1–49 berstatus `Alive` (`validFrom: 1, validUntil: 50`), Bab 50+ berstatus `Deceased` (`validFrom: 50, validUntil: null`).
+* **Constraint Integritas:** Baris dengan `validUntil <= validFrom` ditolak secara otomatis oleh aplikasi.
 
 ---
 
-## 📁 Struktur Proyek
+## 📁 Struktur Direktori
 
 ```
 constella/
 ├── prisma/
-│   ├── migrations/          # Database migrations
-│   ├── schema.prisma        # Data model (temporal entities)
-│   └── seed.ts              # Seed data dengan test cases lengkap
+│   ├── migrations/          # PostgreSQL schema migrations
+│   ├── schema.prisma        # Definisi data model temporal & index
+│   └── seed.ts              # Seeding awal dengan kasus uji lengkap
 ├── scripts/
-│   ├── enrich-all.ts        # Batch enrichment script
-│   ├── run-background-daemon.ts  # Background sync daemon
-│   └── sync-all-live-images.ts   # Image sync utility
+│   ├── seed-popular.ts      # Tier 1: Bulk catalog seeder AniList (tanpa AI)
+│   ├── enrich-fandom.ts     # Tier 2: Dynamic Fandom category & wikitext extraction
+│   ├── enrich-all.ts        # Tier 3: Batch lore enrichment (AniList + Fandom + Gemini)
+│   ├── run-background-daemon.ts # Daemon otomatis sinkronisasi berkala (interval 6 jam)
+│   └── sync-all-live-images.ts  # Utility perbaikan aset foto resolusi tinggi
 ├── src/
 │   ├── app/
-│   │   ├── admin/           # CMS admin pages (ingest, review)
-│   │   ├── api/             # API routes (admin, media graph)
-│   │   ├── media/[id]/      # Reader graph visualization page
-│   │   └── page.tsx         # Homepage / media catalog
+│   │   ├── admin/           # Dashboard CMS Admin, Ingest, & Review Queue
+│   │   │   ├── ingest/      # Halaman trigger ingestion manual
+│   │   │   ├── review/      # Halaman validasi draft karakter & unresolved names
+│   │   │   └── page.tsx     # Monitoring live background daemon & media
+│   │   ├── api/             # REST API endpoints
+│   │   │   ├── admin/       # API sinkronisasi, relasi, dan review approval
+│   │   │   └── media/       # Public graph API (/api/media/[id]/graph?chapter=N)
+│   │   ├── media/[id]/      # Halaman interaktif Reader Graph Visualization
+│   │   ├── globals.css      # Desain tema gelap modern (Tailwind v4)
+│   │   ├── layout.tsx       # Root layout & font Geist
+│   │   └── page.tsx         # Katalog media & beranda utama
 │   ├── components/
-│   │   ├── AdminDrawer.tsx  # Admin panel drawer
-│   │   ├── ChapterSlider.tsx & ChapterDropdown.tsx  # Chapter controls
-│   │   ├── CharacterModal.tsx    # Character detail modal
-│   │   ├── CharacterSearch.tsx   # Character search
-│   │   ├── FloatingPanel.tsx     # Floating info panel
-│   │   ├── GraphCanvas.tsx       # Cytoscape.js graph renderer
-│   │   ├── Navbar.tsx            # Navigation bar
-│   │   └── SpoilerToggle.tsx     # Spoiler reveal/hide toggle
-│   ├── generated/prisma/    # Auto-generated Prisma client
+│   │   ├── AdminDrawer.tsx  # Quick admin management drawer
+│   │   ├── ChapterDropdown.tsx & ChapterSlider.tsx # Kontrol pemilihan bab
+│   │   ├── CharacterModal.tsx    # Modal detail profil, status, & timeline karakter
+│   │   ├── CharacterSearch.tsx   # Fitur pencarian instan karakter pada kanvas
+│   │   ├── FloatingPanel.tsx     # Panel navigasi melayang & statistik graf
+│   │   ├── GraphCanvas.tsx       # Engine Cytoscape.js (orbit faksi, persistensi koordinat)
+│   │   ├── Navbar.tsx            # Bar navigasi utama
+│   │   └── SpoilerToggle.tsx     # Komponen reveal/collapse spoiler
+│   ├── generated/prisma/    # Prisma client yang di-generate otomatis
 │   └── lib/
-│       ├── anilist.ts       # AniList GraphQL API client
-│       ├── fandom.ts        # Fandom MediaWiki scraper
-│       ├── gemini.ts        # Gemini AI extraction logic
-│       ├── name-resolution.ts  # Name matching & deduplication
-│       ├── temporal.ts      # Temporal validation (validFrom/validUntil)
-│       ├── background-sync.ts  # Background synchronization
+│       ├── anilist.ts       # GraphQL client AniList (katalog judul, cover, karakter)
+│       ├── fandom.ts        # Scraper MediaWiki Fandom (paginasi kategori & infobox)
+│       ├── gemini.ts        # Gemini AI extractor (JSON schema, fallback chain ke Groq)
+│       ├── name-dedupe.ts   # Normalisasi nama & heuristik penggabungan duplikat
+│       ├── name-resolution.ts # Resolusi target nama LLM ke database Foreign Key
+│       ├── temporal.ts      # Validasi batasan waktu temporal validFrom/validUntil
+│       ├── background-sync.ts # Engine sinkronisasi berkala otomatis
 │       └── prisma.ts        # Prisma client singleton
 ├── tests/
-│   └── graph.test.ts        # Zero-spoiler leakage tests
-└── PRD.md                   # Project Requirement Document (v3)
+│   └── graph.test.ts        # Automated zero-spoiler leakage test suite
+├── .env.example             # Template konfigurasi environment
+├── package.json             # Dependensi & skrip eksekusi
+└── PRD.md                   # Project Requirement Document (Revisi v3)
 ```
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Panduan Memulai (Getting Started)
 
-### Prerequisites
+### Kebutuhan Sistem (Prerequisites)
+- **Node.js** ≥ 18.x
+- **PostgreSQL** ≥ 15.x
+- **npm** (atau pnpm / yarn)
 
-- **Node.js** ≥ 18
-- **PostgreSQL** ≥ 15
-- **npm** (atau yarn/pnpm)
-
-### 1. Clone & Install
+### 1. Clone & Instalasi
 
 ```bash
 git clone <repository-url>
-cd spoiler-free-map
+cd constella
 npm install
 ```
 
-### 2. Setup Environment
+### 2. Konfigurasi Environment (`.env`)
+
+Salin file `.env.example` menjadi `.env`:
 
 ```bash
 cp .env.example .env
-# Edit .env dengan credentials database dan API keys Anda
 ```
 
-| Variable | Deskripsi |
-| ---------- | ----------- |
-| `DATABASE_URL` | Connection string PostgreSQL |
-| `GEMINI_API_KEY` | Google Gemini API key ([dapatkan di sini](https://aistudio.google.com/app/apikey)) |
-| `GEMINI_MODEL` | Model Gemini yang digunakan (mendukung fallback chain, pisahkan dengan koma) |
-| `GROQ_API_KEY` | *(Opsional)* Groq API key sebagai fallback jika Gemini rate-limited |
-| `GROQ_MODEL` | *(Opsional)* Model Groq yang digunakan |
+Sesuaikan nilai variabel:
 
-### 3. Setup Database
+```env
+# ==============================================================================
+# Database Configuration (PostgreSQL + Prisma)
+# ==============================================================================
+DATABASE_URL="postgresql://postgres:password@localhost:5432/constella?schema=public"
+
+# ==============================================================================
+# AI / LLM Configuration (Structured Lore Extraction)
+# Dapatkan Gemini key gratis di: https://aistudio.google.com/app/apikey
+# ==============================================================================
+GEMINI_API_KEY="your-gemini-api-key"
+
+# Rantai model Gemini dieksekusi berurutan jika terjadi limit/error:
+GEMINI_MODEL="gemini-3.5-flash, gemini-3.5-flash-lite, gemini-flash-lite-latest, gemini-3.1-flash-lite"
+
+# Groq API Fallback (digunakan jika kuota harian Gemini habis)
+# Dapatkan Groq key di: https://console.groq.com/keys
+GROQ_API_KEY="your-groq-api-key"
+GROQ_MODEL="openai/gpt-oss-120b,llama-3.3-70b-versatile"
+```
+
+### 3. Setup Database & Migrasi
 
 ```bash
-# Generate Prisma client
+# Generate Prisma Client
 npx prisma generate
 
-# Jalankan migrasi database
-npx prisma migrate dev
+# Jalankan migrasi skema database
+npx prisma migrate dev --name init
 
-# (Opsional) Seed database dengan data contoh
+# Jalankan seed data uji coba (memuat seluruh kasus uji temporal)
 npx prisma db seed
 ```
 
-### 4. Run Development Server
+### 4. Menjalankan Aplikasi
 
 ```bash
 npm run dev
 ```
 
-Buka [http://localhost:3000](http://localhost:3000) di browser.
+Buka peramban di [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## 📡 API Endpoints
+## 🛠️ CLI Skrip & Otomatisasi Data
 
-### Public API
+Proyek ini menyediakan serangkaian skrip CLI untuk manajemen data katalog dan ekstraksi lore:
+
+| Perintah | Deskripsi | Opsi Berguna |
+|---|---|---|
+| `npm run dev` | Menjalankan server Next.js lokal (Turbopack) | `-` |
+| `npm run build` | Melakukan build bundle production | `-` |
+| `npm run lint` | Memeriksa kepatuhan kode dengan ESLint | `-` |
+| `npm run sync:daemon` | Menjalankan background worker daemon | Sinkronisasi per 6 jam |
+| `npm run sync:repair` | Memperbaiki dan memperbarui URL foto karakter live | `-` |
+| `npx tsx -r dotenv/config scripts/seed-popular.ts` | **Tier 1:** Bulk ingest katalog judul populer dari AniList (tanpa AI) | `--pages=2`<br>`--perPage=20`<br>`--limit=40`<br>`--dry-run` |
+| `npx tsx -r dotenv/config scripts/enrich-fandom.ts` | **Tier 2:** Ekstraksi dinamis kategori Fandom ke tabel review | `--title="Solo Leveling"`<br>`--limit=30`<br>`--dry-run` |
+| `npx tsx -r dotenv/config scripts/enrich-all.ts` | **Tier 3:** Batch lore enrichment komprehensif langsung ke DB | `--mediaId=<uuid>`<br>`--series=<slug>` |
+
+---
+
+## 📡 Dokumentasi Endpoint API
+
+### 🌐 Public API (Reader)
+
+#### `GET /api/media/[mediaId]/graph?chapter=N`
+Mengembalikan graf relasi bebas-spoiler untuk judul `mediaId` di bab `N`.
+
+**Contoh Response Contract:**
+```json
+{
+  "mediaId": "21b733f4-b322-4985-a847-c75caea6f028",
+  "chapter": 50,
+  "totalChapters": 200,
+  "factions": [
+    { "id": "uuid-fac-1", "name": "Baskerville Clan", "colorHex": "#dc2626" }
+  ],
+  "nodes": [
+    {
+      "id": "uuid-char-1",
+      "name": "Vikir van Baskerville",
+      "imageUrl": "https://...",
+      "status": { "status": "Alive", "isSensitive": false },
+      "description": { "text": "Swordmaster of the Ironblood...", "isSensitive": true },
+      "factions": [ { "factionId": "uuid-fac-1", "isSensitive": false } ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "uuid-edge-1",
+      "source": "uuid-char-1",
+      "target": "uuid-char-2",
+      "relationType": "Ally",
+      "isSensitive": false
+    }
+  ]
+}
+```
+> **Keamanan:** Field `validFrom`, `validUntil`, atau `introducedAtChapter` tidak pernah dimunculkan di response publik.
+
+---
+
+### 🔐 Admin API (CMS)
 
 | Method | Endpoint | Deskripsi |
-|--------|----------|-----------|
-| `GET` | `/api/media/[mediaId]/graph?chapter=N` | Mengambil graf relasi yang difilter untuk chapter N |
-
-### Admin API
-
-| Method | Endpoint | Deskripsi |
-| -------- | ---------- | ----------- |
-| `POST` | `/api/admin/ingest` | Memulai ingestion pipeline (AniList → Fandom → Gemini) |
-| `GET` | `/api/admin/review` | Mengambil daftar draft untuk di-review |
-| `POST` | `/api/admin/review/approve` | Approve draft dan pindahkan ke tabel aktif |
+|---|---|---|
+| `GET` | `/api/admin/sync` | Mendapatkan status daemon & log aktivitas sinkronisasi live |
+| `POST` | `/api/admin/sync` | Menjalankan sinkronisasi katalog atau ekstraksi lore secara manual |
+| `GET` | `/api/admin/review` | Mengambil daftar draft ingestion berstatus `PENDING` / `UNRESOLVED` |
+| `POST` | `/api/admin/review/approve` | Menyetujui draft dan memindahkannya ke tabel aktif (idempotent) |
+| `PATCH` | `/api/admin/relationships/[id]` | Mengubah rentang bab temporal (`validFrom`, `validUntil`) atau sensitivitas relasi |
+| `DELETE` | `/api/admin/relationships/[id]` | Menghapus relasi dari database |
 
 ---
 
-## 🔒 Zero-Spoiler Architecture
+## 🧪 Pengujian (Automated Testing)
 
-Sistem perlindungan spoiler terdiri dari dua layer independen:
-
-```
-┌──────────────────────────────────────────────────────┐
-│  Layer 1: Chapter Filter (Backend — Non-Negotiable)  │
-│  ─────────────────────────────────────────────────── │
-│  • WHERE validFrom <= N AND (validUntil > N OR NULL) │
-│  • Edge validasi dua sisi (source & target exist)    │
-│  • Metadata temporal TIDAK dikirim ke client          │
-│  • Evaluasi sepenuhnya di database query              │
-└──────────────────────────────────────────────────────┘
-                        ↓ data yang lolos
-┌──────────────────────────────────────────────────────┐
-│  Layer 2: Sensitivity Flag (Frontend — UX Control)   │
-│  ─────────────────────────────────────────────────── │
-│  • isSensitive: true → konten collapsed [Spoiler ▼]  │
-│  • Reveal-state di-reset setiap slider berubah       │
-│  • Edge sensitive: label generik sampai diklik        │
-└──────────────────────────────────────────────────────┘
-```
-
----
-
-## 🧪 Testing
+Uji kepatuhan kebijakan *zero-leakage* dijalankan melalui skrip pengujian otomatis:
 
 ```bash
-# Jalankan zero-spoiler leakage test
 npx tsx tests/graph.test.ts
 ```
 
-Test mencakup:
-
-- ✅ Tidak ada item dengan `validFrom > N` di response
-- ✅ Tidak ada edge menggantung (dangling edges)
-- ✅ Tidak ada metadata temporal di payload publik
-- ✅ Reveal-state reset saat chapter slider berubah
-
----
-
-## 🛠️ Scripts
-
-| Script | Deskripsi |
-| -------- | ----------- |
-| `npm run dev` | Jalankan development server |
-| `npm run build` | Build production bundle |
-| `npm run lint` | Jalankan ESLint |
-| `npm run sync:daemon` | Jalankan background sync daemon |
-| `npm run sync:repair` | Sinkronisasi ulang semua gambar karakter |
+**Kriteria Uji yang Diverifikasi:**
+1. **Zero-Leakage Assurance:** Melakukan iterasi bab $1 \le N \le totalChapters$ pada data seed dan memastikan tidak ada data dengan `validFrom > N` atau `introducedAtChapter > N` yang bocor.
+2. **Dangling Edge Elimination:** Memastikan seluruh `source` dan `target` pada array `edges` terdaftar valid di array `nodes`.
+3. **Temporal Metadata Hygiene:** Menjamin tidak ada atribut `validFrom`, `validUntil`, atau `introducedAtChapter` pada response client.
+4. **Spoiler Toggle Isolation:** Memastikan logika `isSensitive` independen dari query database dan tersaring dengan benar di UI.
 
 ---
 
-## 📄 Lisensi
+## 📄 Lisensi & Hak Cipta
 
-Proyek skripsi — hak cipta dilindungi.
+Proyek Skripsi Sarjana — Dikembangkan oleh **Graciano Tilaar**.  
+Hak Cipta Dilindungi Undang-Undang.

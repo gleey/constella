@@ -507,3 +507,98 @@ export async function fetchFandomCategoryCharacters(
   }
 }
 
+// ── Subpage / non-character title patterns to filter out ─────────────
+const SKIP_TITLE_PATTERNS = [
+  /\bcategory:/i,
+  /\blist of\b/i,
+  /\/gallery$/i,
+  /\/image gallery$/i,
+  /\/relationships$/i,
+  /\/relationship$/i,
+  /\/abilities$/i,
+  /\/history$/i,
+  /\/synopsis$/i,
+  /\/quotes$/i,
+  /\/trivia$/i,
+];
+
+function isCharacterTitle(title: string): boolean {
+  return !SKIP_TITLE_PATTERNS.some((re) => re.test(title));
+}
+
+/**
+ * Fully-paginated Fandom category member fetch with fallback categories.
+ * Loops via gcmcontinue until all pages are retrieved, filters subpages/non-characters.
+ */
+export async function fetchFandomCategoryCharactersPaginated(
+  wikiSubdomain: string,
+  maxResults = 500,
+): Promise<FandomCharacterSummary[]> {
+  const cacheKey = `fandom:category-paginated:${wikiSubdomain}:${maxResults}`;
+  const cached = cacheGet<FandomCharacterSummary[]>(cacheKey);
+  if (cached) return cached;
+
+  // Fallback category titles wiki authors commonly use
+  const categoryTitles = [
+    "Category:Characters",
+    "Category:Character",
+    "Category:Main Characters",
+  ];
+
+  for (const categoryTitle of categoryTitles) {
+    const results: FandomCharacterSummary[] = [];
+    const seen = new Set<string>();
+    let gcmcontinue: string | undefined;
+
+    try {
+      do {
+        const params = new URLSearchParams({
+          action: "query",
+          generator: "categorymembers",
+          gcmtitle: categoryTitle,
+          gcmlimit: "50", // MediaWiki max per batch
+          gcmnamespace: "0",
+          prop: "pageimages",
+          piprop: "original|thumbnail",
+          pithumbsize: "600",
+          format: "json",
+        });
+        if (gcmcontinue) params.set("gcmcontinue", gcmcontinue);
+
+        const res = await fetch(`${apiUrl(wikiSubdomain)}?${params}`);
+        if (!res.ok) break;
+
+        const data = await res.json();
+        const pages = data.query?.pages || {};
+
+        for (const pageId of Object.keys(pages)) {
+          const page = pages[pageId];
+          if (!page?.title) continue;
+          const title = page.title.trim();
+          if (!isCharacterTitle(title)) continue;
+          if (seen.has(title.toLowerCase())) continue;
+          seen.add(title.toLowerCase());
+
+          results.push({
+            name: title,
+            imageUrl: page.thumbnail?.source || page.original?.source || "",
+          });
+        }
+
+        gcmcontinue = data.continue?.gcmcontinue;
+      } while (gcmcontinue && results.length < maxResults);
+
+      // If we got results from this category, cache and return
+      if (results.length > 0) {
+        const trimmed = results.slice(0, maxResults);
+        cacheSet(cacheKey, trimmed, FANDOM_CACHE_TTL);
+        return trimmed;
+      }
+    } catch {
+      // Try next fallback category
+    }
+  }
+
+  return [];
+}
+

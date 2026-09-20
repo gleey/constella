@@ -20,7 +20,7 @@ import {
   fetchCharacterImage,
   fetchFandomCategoryCharacters,
 } from "./fandom";
-import { parseCharacterWikitext, type GeminiParsedCharacter, normalizeGeminiOutput } from "./gemini";
+import { parseCharacterWikitext, type GeminiParsedCharacter, normalizeGeminiOutput, getGeminiModels } from "./gemini";
 import { resolveCharacterName } from "./name-resolution";
 import { normalizeName, shouldMergeCharacters } from "./name-dedupe";
 import { validateTemporalBounds } from "./temporal";
@@ -438,6 +438,12 @@ async function synthesizeLoreFallback(
   const apiKey = process.env.GEMINI_API_KEY;
   const groqApiKey = process.env.GROQ_API_KEY;
 
+  // Groq model chain: comma-separated in GROQ_MODEL, tried in order.
+  const groqModels = (process.env.GROQ_MODEL || "openai/gpt-oss-120b,llama-3.3-70b-versatile")
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+
   const prompt = `You are an expert anime/manga/manhwa lore archivist.
 Provide accurate, lore-grounded structured character data for:
 Character: "${characterName}" from the series "${seriesTitle}" (Total chapters: ${totalChapters}).
@@ -458,48 +464,72 @@ REQUIREMENTS:
 }`;
 
   if (apiKey) {
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const res = await ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
-        contents: prompt,
-        config: { temperature: 0.2 },
-      });
-      const text = (res.text ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-      const parsed = JSON.parse(text);
-      return normalizeGeminiOutput(parsed, totalChapters);
-    } catch {
-      // jump to Groq
+    const ai = new GoogleGenAI({ apiKey });
+    for (const model of getGeminiModels()) {
+      try {
+        const res = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: { temperature: 0.2 },
+        });
+        const text = (res.text ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        const parsed = JSON.parse(text);
+        return normalizeGeminiOutput(parsed, totalChapters);
+      } catch (err: any) {
+        console.warn(`[Gemini-Synth] Model ${model} gagal: ${err.message || String(err)}. Lanjut ke model berikut...`);
+        if (err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED")) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
     }
   }
 
+  // Groq model chain: try each model in order; continue on non-OK or error
+  // (covers decommissioned models as well as rate limits).
   if (groqApiKey) {
-    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${groqApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-        messages: [
-          { role: "system", content: "You are an expert anime/manga lore archivist. Return valid JSON only." },
-          { role: "user", content: prompt },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.2,
-      }),
-    });
+    for (const groqModel of groqModels) {
+      try {
+        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${groqApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: groqModel,
+            messages: [
+              { role: "system", content: "You are an expert anime/manga lore archivist. Return valid JSON only." },
+              { role: "user", content: prompt },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.2,
+          }),
+        });
 
-    if (groqRes.ok) {
-      const data = await groqRes.json();
-      const content = data.choices?.[0]?.message?.content || "{}";
-      const parsed = JSON.parse(content);
-      return normalizeGeminiOutput(parsed, totalChapters);
+        if (groqRes.ok) {
+          const data = await groqRes.json();
+          const content = data.choices?.[0]?.message?.content || "{}";
+          const parsed = JSON.parse(content);
+          return normalizeGeminiOutput(parsed, totalChapters);
+        }
+
+        if (groqRes.status === 429) {
+          const errJson = await groqRes.json().catch(() => ({}));
+          const waitMatch = errJson?.error?.message?.match(/in (\d+(?:\.\d+)?s)/);
+          const waitSec = waitMatch ? Math.ceil(parseFloat(waitMatch[1])) + 2 : 15;
+          console.log(`[Groq-Synth] Model ${groqModel} rate-limited. Menunggu ${waitSec} detik...`);
+          await new Promise((r) => setTimeout(r, waitSec * 1000));
+          continue;
+        }
+
+        console.warn(`[Groq-Synth] Model ${groqModel} gagal (HTTP ${groqRes.status}). Lanjut ke model berikut...`);
+      } catch (e: any) {
+        console.warn(`[Groq-Synth] Model ${groqModel} error: ${e.message || String(e)}. Lanjut ke model berikut...`);
+      }
     }
   }
 
-  throw new Error(`Gagal sintesis lore untuk ${characterName}`);
+  throw new Error(`Semua provider LLM gagal untuk sintesis ${characterName}`);
 }
 
 /**

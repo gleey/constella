@@ -5,11 +5,21 @@
  * Uses @google/genai SDK.
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 // Model default list prioritizing active high-throughput models in 2026
 export function getGeminiModels(): string[] {
   const envModel = process.env.GEMINI_MODEL || "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-flash-lite-latest,gemini-3.1-flash-lite,gemini-3-flash-preview";
+  return envModel
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+}
+
+// Groq model chain: comma-separated in GROQ_MODEL, tried in order.
+// If the first model is decommissioned / errors, the next one is attempted.
+export function getGroqModels(): string[] {
+  const envModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b,llama-3.3-70b-versatile";
   return envModel
     .split(",")
     .map((m) => m.trim())
@@ -79,14 +89,84 @@ CRITICAL RULES:
 7. "isSensitive" guidelines:
    - true: Plot twists, deaths, betrayals, secret family relations, secret identities, major endgame power-ups.
    - false: Publicly known facts from their debut, initial rank, starting guild, general status.
-8. OUTPUT FORMAT: Return ONLY valid JSON with no markdown fences, matching:
-{
-  "introducedAtChapter": <number>,
-  "descriptions": [{ "text": "<string>", "validFrom": <number>, "validUntil": <number|null>, "isSensitive": <boolean> }],
-  "statuses": [{ "status": "<string>", "validFrom": <number>, "validUntil": <number|null>, "isSensitive": <boolean> }],
-  "relationships": [{ "targetName": "<string>", "relationType": "<string>", "validFrom": <number>, "validUntil": <number|null>, "isSensitive": <boolean> }],
-  "factions": [{ "factionName": "<string>", "validFrom": <number>, "validUntil": <number|null>, "isSensitive": <boolean> }]
-}`;
+8. OUTPUT FORMAT: Return ONLY valid JSON matching the provided schema.`;
+
+/**
+ * Gemini native responseJsonSchema for GeminiParsedCharacter.
+ * Guarantees valid JSON output matching the interface without markdown fence stripping.
+ */
+const GEMINI_CHARACTER_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    introducedAtChapter: {
+      type: Type.INTEGER,
+      description: "First chapter where this character appears. Must be >= 1.",
+    },
+    descriptions: {
+      type: Type.ARRAY,
+      description: "3-8 chronological description phases capturing the character's story arc evolution.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          text: { type: Type.STRING, description: "1-3 sentence description of this story phase." },
+          validFrom: { type: Type.INTEGER, description: "Chapter number where this phase starts." },
+          validUntil: { type: Type.INTEGER, description: "Exclusive upper bound chapter. Omit or set 0 for ongoing." },
+          isSensitive: { type: Type.BOOLEAN, description: "True if this reveals plot twists, deaths, or major spoilers." },
+        },
+        required: ["text", "validFrom", "isSensitive"],
+        propertyOrdering: ["text", "validFrom", "validUntil", "isSensitive"],
+      },
+    },
+    statuses: {
+      type: Type.ARRAY,
+      description: "Character life statuses across chapters.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          status: { type: Type.STRING, description: "One of: Alive, Deceased, Imprisoned, MIA, Unknown." },
+          validFrom: { type: Type.INTEGER },
+          validUntil: { type: Type.INTEGER, description: "Exclusive upper bound. Omit or set 0 for ongoing." },
+          isSensitive: { type: Type.BOOLEAN },
+        },
+        required: ["status", "validFrom", "isSensitive"],
+        propertyOrdering: ["status", "validFrom", "validUntil", "isSensitive"],
+      },
+    },
+    relationships: {
+      type: Type.ARRAY,
+      description: "Lore-accurate relationships with other characters, with temporal bounds.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          targetName: { type: Type.STRING, description: "Full name of the related character." },
+          relationType: { type: Type.STRING, description: "Specific relationship type (Enemy, Rival, Partner, Friend, etc.)." },
+          validFrom: { type: Type.INTEGER },
+          validUntil: { type: Type.INTEGER, description: "Exclusive upper bound. Omit or set 0 for ongoing." },
+          isSensitive: { type: Type.BOOLEAN },
+        },
+        required: ["targetName", "relationType", "validFrom", "isSensitive"],
+        propertyOrdering: ["targetName", "relationType", "validFrom", "validUntil", "isSensitive"],
+      },
+    },
+    factions: {
+      type: Type.ARRAY,
+      description: "Guilds, organizations, or factions the character belongs to.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          factionName: { type: Type.STRING, description: "Name of the faction or guild." },
+          validFrom: { type: Type.INTEGER },
+          validUntil: { type: Type.INTEGER, description: "Exclusive upper bound. Omit or set 0 for ongoing." },
+          isSensitive: { type: Type.BOOLEAN },
+        },
+        required: ["factionName", "validFrom", "isSensitive"],
+        propertyOrdering: ["factionName", "validFrom", "validUntil", "isSensitive"],
+      },
+    },
+  },
+  required: ["introducedAtChapter", "descriptions", "statuses", "relationships", "factions"],
+  propertyOrdering: ["introducedAtChapter", "descriptions", "statuses", "relationships", "factions"],
+} as const;
 
 /**
  * Normalizes any schema variations returned by LLM into strict GeminiParsedCharacter format.
@@ -101,7 +181,7 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
   const descriptions = rawDescriptions.map((d: any, idx: number) => {
     const text = String(d.text || d.description || d.content || `Character arc ${idx + 1}`).trim();
     let validFrom = Number.isInteger(d.validFrom) ? Math.max(1, d.validFrom) : introducedAtChapter;
-    let validUntil = Number.isInteger(d.validUntil) ? d.validUntil : null;
+    let validUntil = Number.isInteger(d.validUntil) && d.validUntil > 0 ? d.validUntil : null;
     if (validUntil !== null && validUntil <= validFrom) {
       validUntil = validFrom + 20;
     }
@@ -130,7 +210,7 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
       status = "Alive";
     }
     let validFrom = Number.isInteger(s.validFrom) ? Math.max(1, s.validFrom) : introducedAtChapter;
-    let validUntil = Number.isInteger(s.validUntil) ? s.validUntil : null;
+    let validUntil = Number.isInteger(s.validUntil) && s.validUntil > 0 ? s.validUntil : null;
     if (validUntil !== null && validUntil <= validFrom) {
       validUntil = null;
     }
@@ -160,7 +240,7 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
         relationType = "Ally";
       }
       let validFrom = Number.isInteger(r.validFrom) ? Math.max(1, r.validFrom) : introducedAtChapter;
-      let validUntil = Number.isInteger(r.validUntil) ? r.validUntil : null;
+      let validUntil = Number.isInteger(r.validUntil) && r.validUntil > 0 ? r.validUntil : null;
       if (validUntil !== null && validUntil <= validFrom) {
         validUntil = null;
       }
@@ -179,7 +259,7 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
     .map((f: any) => {
       const factionName = String(f.factionName || f.name || f.faction || "").trim();
       let validFrom = Number.isInteger(f.validFrom) ? Math.max(1, f.validFrom) : introducedAtChapter;
-      let validUntil = Number.isInteger(f.validUntil) ? f.validUntil : null;
+      let validUntil = Number.isInteger(f.validUntil) && f.validUntil > 0 ? f.validUntil : null;
       if (validUntil !== null && validUntil <= validFrom) {
         validUntil = null;
       }
@@ -210,8 +290,7 @@ export async function parseCharacterWithGroq(
   const groqApiKey = process.env.GROQ_API_KEY;
   if (!groqApiKey) throw new Error("GROQ_API_KEY not set");
 
-  const groqModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
-  console.log(`[Groq-Fallback] Memproses ${characterName} menggunakan ${groqModel}...`);
+  const groqModels = getGroqModels();
 
   // Compact wikitext for Groq to stay within TPM rate limits
   const compactWikitext = wikitext.length > 3500 ? wikitext.slice(0, 3500) + "\n...(truncated for context)" : wikitext;
@@ -223,48 +302,56 @@ Total chapters in series: ${totalChapters}
 Raw wikitext:
 ${compactWikitext}`;
 
-  // Retry up to 3 times if rate limited (429)
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${groqApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: groqModel,
-        messages: [
-          { role: "system", content: SYSTEM_INSTRUCTION },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.2,
-      }),
-    });
+  let lastModelError: unknown = null;
 
-    if (response.status === 429) {
-      const errJson = await response.json().catch(() => ({}));
-      const waitMatch = errJson?.error?.message?.match(/in (\d+(?:\.\d+)?s)/);
-      const waitSec = waitMatch ? Math.ceil(parseFloat(waitMatch[1])) + 2 : 15;
-      console.log(`[Groq-RateLimit] TPM terlewati. Menunggu ${waitSec} detik sebelum retry (attempt ${attempt}/3)...`);
-      await new Promise((r) => setTimeout(r, waitSec * 1000));
-      continue;
+  for (const groqModel of groqModels) {
+    console.log(`[Groq-Fallback] Memproses ${characterName} menggunakan ${groqModel}...`);
+
+    // Retry up to 3 times if rate limited (429)
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${groqApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: groqModel,
+          messages: [
+            { role: "system", content: SYSTEM_INSTRUCTION },
+            { role: "user", content: userPrompt },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.2,
+        }),
+      });
+
+      if (response.status === 429) {
+        const errJson = await response.json().catch(() => ({}));
+        const waitMatch = errJson?.error?.message?.match(/in (\d+(?:\.\d+)?s)/);
+        const waitSec = waitMatch ? Math.ceil(parseFloat(waitMatch[1])) + 2 : 15;
+        console.log(`[Groq-RateLimit] TPM terlewati. Menunggu ${waitSec} detik sebelum retry (${groqModel} attempt ${attempt}/3)...`);
+        await new Promise((r) => setTimeout(r, waitSec * 1000));
+        continue;
+      }
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.warn(`[Groq-Fallback] Model ${groqModel} gagal (${response.status}). Beralih ke model berikutnya...`);
+        lastModelError = new Error(`Groq API error (${response.status}) on ${groqModel}: ${errText}`);
+        break; // non-429 error (e.g. model decommissioned) → try next model
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || "{}";
+      const parsed = JSON.parse(content);
+      const normalized = normalizeGeminiOutput(parsed, totalChapters);
+      console.log(`[Groq-Fallback] Berhasil: ${characterName} (${normalized.descriptions.length} desc phases, ${normalized.relationships.length} relations)`);
+      return normalized;
     }
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Groq API error (${response.status}): ${errText}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content);
-    const normalized = normalizeGeminiOutput(parsed, totalChapters);
-    console.log(`[Groq-Fallback] Berhasil: ${characterName} (${normalized.descriptions.length} desc phases, ${normalized.relationships.length} relations)`);
-    return normalized;
   }
 
-  throw new Error(`Groq rate limit terus terjadi untuk ${characterName}`);
+  throw new Error(`Semua model Groq gagal untuk ${characterName}. Error terakhir: ${lastModelError instanceof Error ? lastModelError.message : String(lastModelError)}`);
 }
 
 export async function parseCharacterWikitext(
@@ -288,7 +375,6 @@ Total chapters in series: ${totalChapters}
 Raw wikitext:
 ${wikitext}`;
 
-  let geminiFailed = false;
   let lastError: unknown;
 
   if (apiKey) {
@@ -304,22 +390,24 @@ ${wikitext}`;
             config: {
               systemInstruction: SYSTEM_INSTRUCTION,
               temperature: 0.2,
+              responseMimeType: "application/json",
+              responseJsonSchema: GEMINI_CHARACTER_SCHEMA,
             },
           });
 
           const text = response.text?.trim() ?? "";
-          const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-          const parsed = JSON.parse(cleaned);
+          const parsed = JSON.parse(text);
           const normalized = normalizeGeminiOutput(parsed, totalChapters);
           console.log(`[Gemini] Berhasil: ${characterName} (${normalized.descriptions.length} desc phases, ${normalized.relationships.length} relations)`);
           return normalized;
         } catch (err: any) {
           console.warn(`[Gemini] Model ${model} attempt ${attempt} gagal: ${err.message || String(err)}`);
           lastError = err;
-          // If quota rate limit (429), break early to Groq fallback
+          // If quota rate limit (429), move to the NEXT Gemini model in the chain
+          // instead of abandoning all remaining Gemini models.
           if (err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED") || String(err).includes("429")) {
-            console.log(`[Gemini-Quota] Kuota Gemini habis (429). Langsung beralih ke Groq fallback...`);
-            geminiFailed = true;
+            console.log(`[Gemini-Quota] Model ${model} kena 429. Lanjut ke model Gemini berikut...`);
+            await new Promise((r) => setTimeout(r, 2000));
             break;
           }
           if (attempt < 2) {
@@ -327,22 +415,21 @@ ${wikitext}`;
           }
         }
       }
-      if (geminiFailed) break;
     }
-  } else {
-    geminiFailed = true;
   }
 
-  // Fallback to Groq if Gemini failed or quota exceeded
+  // Fallback: Groq model chain (see getGroqModels) — only reached
+  // after ALL Gemini models in the chain have been tried.
   if (groqApiKey) {
-    console.log(`[LLM-Fallback] Mengalihkan ke Groq (${process.env.GROQ_MODEL || "openai/gpt-oss-120b"})...`);
+    const groqModels = getGroqModels();
+    console.log(`[LLM-Fallback] Mengalihkan ke Groq (${groqModels.join(" -> ")})...`);
     try {
       return await parseCharacterWithGroq(wikitext, characterName, chapterNumberingSource, totalChapters);
     } catch (groqErr: any) {
-      console.error(`[Groq-Fallback] Gagal memproses dengan Groq: ${groqErr.message}`);
-      throw groqErr;
+      console.warn(`[Groq-Fallback] Gagal memproses dengan Groq: ${groqErr.message}`);
+      lastError = groqErr;
     }
   }
 
-  throw new Error(`Semua provider LLM (Gemini & Groq) gagal. Error terakhir: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+  throw new Error(`Semua provider LLM (Gemini, Groq) gagal. Error terakhir: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
