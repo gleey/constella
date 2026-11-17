@@ -14,6 +14,9 @@ interface Props {
 }
 
 const UNAFFILIATED_ID = "__unaffiliated__";
+// Placeholder transparan: Cytoscape crash saat style "data(imageUrl)" dipetakan ke string kosong.
+const TRANSPARENT_IMG =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
 const KNOWN_PROTAGONISTS = [
   "sung jinwoo",
@@ -199,7 +202,7 @@ export default function GraphCanvas({
           id: mcNode.id,
           label: mcNode.name, // Only name on canvas (PRD requirement)
           color: mcColor,
-          imageUrl: mcNode.imageUrl || "",
+          imageUrl: mcNode.imageUrl || TRANSPARENT_IMG,
           isCharacter: true,
           isMainCharacter: true,
         },
@@ -294,7 +297,7 @@ export default function GraphCanvas({
             label: node.name,
             primaryFactionId: UNAFFILIATED_ID,
             color: colorMap.get(UNAFFILIATED_ID) ?? "#818cf8",
-            imageUrl: node.imageUrl || "",
+            imageUrl: node.imageUrl || TRANSPARENT_IMG,
             isCharacter: true,
             isMainCharacter: false,
           },
@@ -416,7 +419,7 @@ export default function GraphCanvas({
               label: node.name,
               primaryFactionId: facId,
               color: fColor,
-              imageUrl: node.imageUrl || "",
+              imageUrl: node.imageUrl || TRANSPARENT_IMG,
               isCharacter: true,
               isMainCharacter: false,
             },
