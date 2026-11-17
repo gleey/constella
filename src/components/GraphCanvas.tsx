@@ -96,6 +96,14 @@ export default function GraphCanvas({
   const cyRef = useRef<Core | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
 
+  // Simpan callback di ref supaya perubahan identitasnya (inline arrow di
+  // parent) tidak menyalin ulang instance Cytoscape tiap kali node diklik —
+  // yang tadinya menghapus highlight seleksi dan mereset zoom/pan.
+  const onNodeClickRef = useRef(onNodeClick);
+  useEffect(() => {
+    onNodeClickRef.current = onNodeClick;
+  }, [onNodeClick]);
+
   // Handle focusNodeId changes (e.g. from search bar or related click)
   useEffect(() => {
     const cy = cyRef.current;
@@ -122,10 +130,13 @@ export default function GraphCanvas({
     if (!cy) return;
 
     cy.nodes().removeClass("selected");
+    cy.edges().removeClass("highlighted");
     if (selectedNodeId) {
       const target = cy.getElementById(selectedNodeId);
       if (target && target.length > 0) {
         target.addClass("selected");
+        // Tampilkan label relasi hanya untuk edge yang terhubung ke node dipilih.
+        target.connectedEdges().addClass("highlighted");
       }
     }
   }, [selectedNodeId]);
@@ -205,43 +216,37 @@ export default function GraphCanvas({
       });
     }
 
-    // ── 3. Radial sector layout ──────────────────────────────────────────
-    // MC tetap di tengah. Tiap faksi mendapat sektor sudut sama besar;
-    // anggotanya diurutkan berdasarkan chapter debut lalu nama dan diletakkan
-    // di busur konsentris. Posisi dihitung ulang tiap render (tanpa cache
-    // lintas chapter) supaya tidak campur aduk saat chapter bertambah.
-    const SECTOR_FILL = 0.74; // sisa ruang = jarak antar sektor faksi
-    const FIRST_RING = 230;
-    const RING_STEP = 135;
-    const NODE_SPACING = 118; // estimasi jarak antar node pada satu busur
+    // ── 3. Radial sector layout (proporsional) ───────────────────────────
+    // MC tetap di tengah. Tiap faksi mendapat sektor sudut proporsional
+    // dengan jumlah anggotanya: faksi besar menyebar luas, faksi kecil tetap
+    // punya jatah. Anggota diurutkan berdasarkan chapter debut lalu nama,
+    // lalu diletakkan di busur konsentris. Compound bubble sengaja tidak
+    // dipakai — kotak pembatas membuat node saling menimpa saat sebuah faksi
+    // jauh lebih besar dari yang lain. Posisi dihitung ulang tiap render.
+    const MIN_SECTOR_WEIGHT = 2;
+    const SECTOR_FILL = 0.84; // sisa ruang = jarak antar sektor faksi
+    const FIRST_RING = 250;
+    const RING_STEP = 150;
+    const NODE_SPACING = 155;
 
+    const factionWeights = activeFactionIds.map((id) =>
+      Math.max(MIN_SECTOR_WEIGHT, factionMembers.get(id)?.length ?? 0),
+    );
+    const totalWeight = factionWeights.reduce((a, b) => a + b, 0) || 1;
+
+    let cursorAngle = -Math.PI / 2;
     activeFactionIds.forEach((facId, facIdx) => {
-      const fMeta = data.factions.find((f) => f.id === facId);
-      const fName =
-        facId === UNAFFILIATED_ID ? "Independent" : fMeta?.name ?? "Faction";
       const fColor = colorMap.get(facId) ?? "#818cf8";
-
-      const sectorSize = (2 * Math.PI) / Math.max(1, activeFactionIds.length);
-      const sectorCenter = -Math.PI / 2 + facIdx * sectorSize;
+      const sectorSize = (2 * Math.PI * factionWeights[facIdx]) / totalWeight;
       const usable = sectorSize * SECTOR_FILL;
-      const sectorStart = sectorCenter - usable / 2;
+      const sectorStart = cursorAngle + (sectorSize - usable) / 2;
+      cursorAngle += sectorSize;
 
       const members = [...(factionMembers.get(facId) ?? [])].sort((a, b) => {
         const dA = a.debutChapter ?? 1;
         const dB = b.debutChapter ?? 1;
         if (dA !== dB) return dA - dB;
         return a.name.localeCompare(b.name);
-      });
-
-      // Bubble faksi tetap dipakai sebagai pembatas warna kelompok.
-      elements.push({
-        group: "nodes",
-        data: {
-          id: `bubble_${facId}`,
-          label: fName.toUpperCase(),
-          color: fColor,
-          isFactionBubble: true,
-        },
       });
 
       let ring = 0;
@@ -272,7 +277,6 @@ export default function GraphCanvas({
           group: "nodes",
           data: {
             id: node.id,
-            parent: `bubble_${facId}`,
             label: node.name,
             primaryFactionId: facId,
             color: fColor,
@@ -330,30 +334,6 @@ export default function GraphCanvas({
         container,
         elements: safeElements,
       style: [
-        // Faction compound circular/rounded bubble
-        {
-          selector: "node[?isFactionBubble]",
-          style: {
-            "background-color": "#111827",
-            "background-opacity": 0.45,
-            "border-width": 2,
-            "border-color": "data(color)",
-            "border-style": "solid",
-            shape: "roundrectangle",
-            label: "data(label)",
-            "text-valign": "top",
-            "text-halign": "center",
-            "text-margin-y": -12,
-            "font-size": "11px",
-            "font-weight": "bold",
-            color: "data(color)",
-            "text-background-color": "#0b0f19",
-            "text-background-opacity": 0.92,
-            "text-background-padding": "4px",
-            "text-background-shape": "roundrectangle",
-            padding: "36px 28px 24px 28px",
-          },
-        },
         // Character nodes
         {
           selector: "node[?isCharacter]",
@@ -430,25 +410,18 @@ export default function GraphCanvas({
             "underlay-opacity": 0.45,
           },
         },
-        // Relationship edges
+        // Relationship edges — label disembunyikan agar tidak menimpa node.
+        // Muncul hanya saat node/edge dipilih (lihat selector di bawah).
         {
           selector: "edge",
           style: {
-            width: 2.2,
-            "line-color": "#475569",
+            width: 1.8,
+            opacity: 0.7,
+            "line-color": "#3f4d63",
             "curve-style": "bezier",
-            label: "data(label)",
-            "font-size": "9.5px",
-            "font-weight": 600,
-            color: "#cbd5e1",
-            "text-background-color": "#090d16",
-            "text-background-opacity": 0.9,
-            "text-background-padding": "2px",
-            "text-background-shape": "roundrectangle",
-            "text-rotation": "autorotate",
             "target-arrow-shape": "triangle",
-            "target-arrow-color": "#475569",
-            "arrow-scale": 0.8,
+            "target-arrow-color": "#3f4d63",
+            "arrow-scale": 0.75,
           },
         },
         {
@@ -456,18 +429,26 @@ export default function GraphCanvas({
           style: {
             "line-style": "dashed",
             "line-dash-pattern": [6, 4],
-            "line-color": "#64748b",
-            "target-arrow-color": "#64748b",
-            color: "#94a3b8",
+            "line-color": "#4b5a72",
+            "target-arrow-color": "#4b5a72",
           },
         },
         {
-          selector: "edge:selected",
+          selector: "edge.highlighted, edge:selected",
           style: {
-            width: 3.5,
+            width: 3,
+            opacity: 1,
             "line-color": "#818cf8",
             "target-arrow-color": "#818cf8",
-            color: "#c7d2fe",
+            label: "data(label)",
+            "font-size": "10px",
+            "font-weight": 600,
+            color: "#e0e7ff",
+            "text-background-color": "#090d16",
+            "text-background-opacity": 0.95,
+            "text-background-padding": "3px",
+            "text-background-shape": "roundrectangle",
+            "text-rotation": "autorotate",
           },
         },
       ],
@@ -484,7 +465,7 @@ export default function GraphCanvas({
 
     // ── 6. Events ────────────────────────────────────────────────────────
     cy.on("tap", "node[?isCharacter]", (evt) => {
-      onNodeClick(evt.target.id());
+      onNodeClickRef.current(evt.target.id());
     });
 
     cyRef.current = cy;
@@ -501,7 +482,7 @@ export default function GraphCanvas({
         cyRef.current = null;
       }
     };
-  }, [data, onNodeClick]);
+  }, [data]);
 
   const handleZoomIn = () => cyRef.current?.zoom(cyRef.current.zoom() * 1.25);
   const handleZoomOut = () => cyRef.current?.zoom(cyRef.current.zoom() * 0.8);
@@ -556,7 +537,7 @@ export default function GraphCanvas({
       {/* Canvas Hint */}
       <div className="absolute bottom-4 right-4 z-10 pointer-events-none hidden sm:block">
         <span className="text-[11px] text-slate-400 bg-[#0b0f19]/90 px-3 py-1.5 rounded-full border border-[#1e293b]">
-          Main Character centered • Circular faction clusters • Click character for unlocked bio
+          Main character centered • Faction-colored sectors • Click a node for bio & relations
         </span>
       </div>
     </div>
