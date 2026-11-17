@@ -108,21 +108,24 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="relative w-full h-[calc(100vh-4rem)] bg-[#0b0f19] overflow-hidden flex flex-col">
-      {/* Top Header / Control Bar */}
-      <header className="h-16 border-b border-[#1e293b] bg-[#111827]/90 backdrop-blur-md px-4 flex items-center justify-between gap-4 shrink-0 z-30">
-        {/* Left: Back & Media Info */}
+      {/* Top header / control bar */}
+      <header className="h-16 border-b border-white/5 bg-[#0b0f19]/80 backdrop-blur-xl px-4 flex items-center justify-between gap-4 shrink-0 z-30">
+        {/* Left: back & media info */}
         <div className="flex items-center gap-3 min-w-0">
           <Link
             href="/#catalog"
-            className="w-9 h-9 rounded-xl bg-[#161f30] border border-[#27354f] hover:border-[#818cf8] flex items-center justify-center text-slate-300 hover:text-white transition-colors shrink-0"
+            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 ring-1 ring-white/10 hover:ring-indigo-500/50 flex items-center justify-center text-slate-300 hover:text-white transition-colors shrink-0"
             title="Back to Catalog"
+            aria-label="Back to catalog"
           >
-            ←
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+              <path d="M12 4l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </Link>
 
           {media && (
             <div className="flex items-center gap-3 min-w-0">
-              <div className="relative w-9 h-11 rounded-lg overflow-hidden border border-[#27354f] shrink-0 hidden sm:block">
+              <div className="relative w-9 h-11 rounded-lg overflow-hidden ring-1 ring-white/10 shadow-lg shadow-black/30 shrink-0 hidden sm:block">
                 <Image
                   src={media.coverImage}
                   alt={media.title}
@@ -132,21 +135,23 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
                 />
               </div>
               <div className="min-w-0">
-                <h1 className="text-sm sm:text-base font-bold text-white truncate">
+                <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
                   {media.title}
                 </h1>
                 <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                  <span className="px-1.5 py-0.5 rounded bg-[#1e293b] text-[#a5b4fc] border border-[#334155] text-[10px] font-semibold">
+                  <span className="px-1.5 py-0.5 rounded-md bg-indigo-500/10 text-[#a5b4fc] ring-1 ring-indigo-500/30 text-[10px] font-bold uppercase tracking-wide">
                     {media.type}
                   </span>
-                  <span>Source: {media.chapterNumberingSource}</span>
+                  <span className="truncate">
+                    Source: {media.chapterNumberingSource}
+                  </span>
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* Center: Chapter Slider */}
+        {/* Center: chapter slider */}
         <div className="flex items-center gap-2">
           {media && (
             <ChapterSlider
@@ -158,7 +163,7 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
 
-        {/* Right: Character Search */}
+        {/* Right: character search */}
         <div className="flex items-center gap-2">
           {data && (
             <CharacterSearch
@@ -170,13 +175,17 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
         </div>
       </header>
 
-      {/* Main Graph Viewport */}
-      <main className="relative flex-1 w-full h-full overflow-hidden p-3 bg-[#0b0f19]">
+      {/* Main graph viewport */}
+      <main className="relative flex-1 w-full h-full overflow-hidden p-3 bg-[#0b0f19] aurora">
         {loading && !data && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0b0f19]/80 backdrop-blur-sm text-slate-300">
-            <div className="w-12 h-12 border-4 border-[#334155] border-t-[#818cf8] rounded-full animate-spin mb-3" />
-            <p className="text-sm font-semibold tracking-wide">Constructing zero-spoiler temporal graph...</p>
-            <p className="text-xs text-slate-400 mt-1">Applying Layer 1 backend filter for Chapter {chapter}</p>
+            <div className="w-12 h-12 border-4 border-white/10 border-t-indigo-400 rounded-full animate-spin mb-4" />
+            <p className="text-sm font-semibold tracking-wide">
+              Constructing zero-spoiler temporal graph...
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Applying Layer 1 backend filter for Chapter {chapter}
+            </p>
           </div>
         )}
 
@@ -193,16 +202,20 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
               focusNodeId={focusNodeId}
             />
 
-            {/* Faction Legend Bar */}
+            {/* Faction legend bar */}
             {data.factions.length > 0 && (
-              <div className="absolute top-6 left-6 z-20 bg-[#111827]/90 backdrop-blur-md px-3 py-2 rounded-xl border border-[#1e293b] shadow-xl hidden md:flex items-center gap-3">
+              <div className="absolute top-6 left-6 z-20 bg-[#0d1322]/90 backdrop-blur-xl px-3.5 py-2 rounded-full ring-1 ring-white/10 shadow-lg shadow-black/30 hidden md:flex items-center gap-3">
                 <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
-                  Faction:</span>
+                  Faction:
+                </span>
                 <div className="flex items-center gap-2.5">
                   {data.factions.map((f) => (
-                    <div key={f.id} className="flex items-center gap-1.5 text-xs text-slate-300">
+                    <div
+                      key={f.id}
+                      className="flex items-center gap-1.5 text-xs text-slate-300"
+                    >
                       <span
-                        className="w-2.5 h-2.5 rounded-full"
+                        className="w-2.5 h-2.5 rounded-full ring-1 ring-white/20"
                         style={{ backgroundColor: f.colorHex || "#818cf8" }}
                       />
                       <span>{f.name}</span>
@@ -212,7 +225,7 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
               </div>
             )}
 
-            {/* Floating Profile & Unlocked Relations Panel */}
+            {/* Floating profile & unlocked relations panel */}
             <FloatingPanel
               node={selectedNode}
               chapter={chapter}

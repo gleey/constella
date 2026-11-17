@@ -12,27 +12,29 @@ export default function Navbar() {
   ];
 
   return (
-    <nav className="sticky top-0 z-40 border-b border-[#1e293b] bg-[#0b0f19]/90 backdrop-blur-lg">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+    <nav className="sticky top-0 z-40 border-b border-white/5 bg-[#0b0f19]/80 backdrop-blur-xl">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         {/* Logo + links */}
-        <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2.5 font-bold text-lg tracking-tight">
-            <span className="w-8 h-8 rounded-lg bg-[#1e293b] border border-[#334155] text-[#a5b4fc] flex items-center justify-center text-sm font-black shadow-inner">
+        <div className="flex items-center gap-7">
+          <Link href="/" className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#6366f1] to-[#8b5cf6] text-white flex items-center justify-center text-[13px] font-black shadow-lg shadow-indigo-950/40 ring-1 ring-white/10">
               SF
             </span>
-            <span className="text-white font-black tracking-tight text-base sm:text-lg">
-              SpoilerFree <span className="text-[#818cf8] font-medium text-sm">Map</span>
+            <span className="text-white font-bold tracking-tight text-base sm:text-lg">
+              SpoilerFree{" "}
+              <span className="text-[#818cf8] font-semibold">Map</span>
             </span>
           </Link>
+
           <div className="flex items-center gap-1">
             {links.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${
                   pathname === l.href
-                    ? "bg-[#1e293b] text-[#a5b4fc]"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-[#161f30]"
+                    ? "bg-white/5 text-[#a5b4fc] ring-1 ring-white/10"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
                 }`}
               >
                 {l.label}
@@ -41,9 +43,9 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* Right side placeholder / future links */}
+        {/* Right side tagline */}
         <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-500 font-medium hidden md:inline">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500 hidden md:inline">
             Zero-Spoiler Dynamic Map
           </span>
         </div>
