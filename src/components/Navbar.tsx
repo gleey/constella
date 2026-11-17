@@ -30,23 +30,15 @@ export default function Navbar() {
               <Link
                 key={l.href}
                 href={l.href}
-                className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                  pathname === l.href
+                className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${pathname === l.href
                     ? "bg-white/5 text-[#a5b4fc] ring-1 ring-white/10"
                     : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                }`}
+                  }`}
               >
                 {l.label}
               </Link>
             ))}
           </div>
-        </div>
-
-        {/* Right side tagline */}
-        <div className="flex items-center gap-3">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500 hidden md:inline">
-            Zero-Spoiler Dynamic Map
-          </span>
         </div>
       </div>
     </nav>
