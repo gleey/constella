@@ -17,82 +17,9 @@ import { parseCharacterWikitext, type GeminiParsedCharacter, getGeminiModels, no
 import { resolveCharacterName, resolveFactionName } from "../src/lib/name-resolution";
 import { validateTemporalBounds } from "../src/lib/temporal";
 import { GoogleGenAI } from "@google/genai";
+import { FACTION_COLORS, hashString, buildSeriesConfigs, type SeriesMapping } from "./series-config";
 
-interface SeriesMapping {
-  anilistId: number;
-  title: string;
-  fandomWiki: string;
-  mainCharacters: string[]; // Key characters to prioritize for Fandom + Gemini wikitext extraction
-}
 
-const SERIES_CONFIG: SeriesMapping[] = [
-  {
-    anilistId: 119257,
-    title: "Omniscient Reader's Viewpoint",
-    fandomWiki: "omniscient-readers-viewpoint",
-    mainCharacters: ["Kim Dokja", "Yoo Joonghyuk", "Han Sooyoung", "Yoo Sangah", "Jung Heewon", "Lee Hyunsung", "Lee Gilyoung", "Shin Yoosung", "Lee Jihye"],
-  },
-  {
-    anilistId: 108577,
-    title: "The Beginning After the End",
-    fandomWiki: "tbate",
-    mainCharacters: ["Arthur Leywin", "Tessia Eralith", "Sylvie", "Virion Eralith", "Reynolds Leywin", "Alice Leywin", "Kathyln Glayder", "Bairon Wykes"],
-  },
-  {
-    anilistId: 85143,
-    title: "Tower of God",
-    fandomWiki: "towerofgod",
-    mainCharacters: ["Twenty-Fifth Baam", "Koon Aguero Agnis", "Rak Wraithraiser", "Rachel", "Ha Yuri Zahard", "Androssi Zahard", "Urek Mazino", "Khun Ran"],
-  },
-  {
-    anilistId: 144405,
-    title: "The World After the Fall",
-    fandomWiki: "the-world-after-the-fall",
-    mainCharacters: ["Jaehwan", "Mino", "Chungho", "Yoonhwan", "Karlton", "Sirwen Armelt"],
-  },
-  {
-    anilistId: 119717,
-    title: "Overgeared",
-    fandomWiki: "overgeared",
-    mainCharacters: ["Shin Youngwoo", "Yura", "Jishuka", "Huroi", "Vantner", "Pon", "Kraugel", "Piaro", "Khan"],
-  },
-  {
-    anilistId: 136192,
-    title: "Solo Max-Level Newbie",
-    fandomWiki: "max-level-newbie",
-    mainCharacters: ["Kang Jinhyuk", "Teresa de Laurentis", "Alice at the End of the World", "Judas", "An Hyunjin", "Elise de Laurentis"],
-  },
-  {
-    anilistId: 161852,
-    title: "Revenge of the Iron-Blooded Sword Hound",
-    fandomWiki: "revenge-of-the-ironblooded-sword-hound",
-    mainCharacters: ["Vikir Van Baskerville", "Hugo Le Baskerville", "Aiyen", "Pomerian Morg", "Camus Morg", "Sinclair"],
-  },
-  {
-    anilistId: 153284,
-    title: "The Player That Returned 10,000 Years Later",
-    fandomWiki: "player-who-returned-10000-years-later",
-    mainCharacters: ["Oh Kang Woo", "Han Seol-ah", "Kim Shi-hoon", "Echidna", "Cha Yeon-joo", "Baek Hwa-yeon"],
-  },
-  {
-    anilistId: 164857,
-    title: "Surviving the Game as a Barbarian",
-    fandomWiki: "surviving-the-game-as-a-barbarian",
-    mainCharacters: ["Bjorn Yandel", "Ainar", "Erwen Forn de Gavis", "Misha Karlstein", "Rotmiller", "Dwalki"],
-  },
-  {
-    anilistId: 175946,
-    title: "Myst, Might, Mayhem",
-    fandomWiki: "myst-might-mayhem",
-    mainCharacters: ["Mok Gyeong-un", "Cheon Yeo-woon", "Dan So-wol", "Baek Hyang-hwa"],
-  },
-  {
-    anilistId: 172619,
-    title: "The Extra's Academy Survival Guide",
-    fandomWiki: "the-extras-academy-survival-guide",
-    mainCharacters: ["Ed Rothtaylor", "Lucy Mayrill", "Yenika Faelorr", "Lortelle Keheln", "Taylee McLaure", "Princess Penia"],
-  },
-];
 
 /**
  * Fallback synthesizer using Gemini or Groq (openai/gpt-oss-120b) for characters whose Fandom wikitext is missing.
@@ -264,7 +191,21 @@ async function enrichMedia(config: SeriesMapping) {
   const allNamesList = dbCharacters.map((c) => c.name);
 
   // 2. Process priority characters via Fandom + Gemini
-  for (const charName of config.mainCharacters) {
+  // Fallback global: seri tanpa override → pilih otomatis 15 karakter yang belum punya deskripsi.
+  let priorityNames = config.mainCharacters;
+  if (priorityNames.length === 0) {
+    const enrichedIds = new Set(
+      (
+        await prisma.characterDescription.groupBy({
+          by: ["characterId"],
+          where: { character: { mediaId: media.id } },
+        })
+      ).map((d) => d.characterId)
+    );
+    priorityNames = dbCharacters.filter((c) => !enrichedIds.has(c.id)).slice(0, 15).map((c) => c.name);
+    console.log(`[AUTO] Seri "${media.title}" tanpa override → auto-pilih ${priorityNames.length} karakter untuk pengayaan.`);
+  }
+  for (const charName of priorityNames) {
     console.log(`\n--- Memproses Karakter: ${charName} (${config.title}) ---`);
     const dbChar = dbCharacters.find((c) => resolveCharacterName(charName, [c]) !== null) ||
       dbCharacters.find((c) => c.name.toLowerCase().includes(charName.toLowerCase()));
@@ -383,12 +324,23 @@ async function enrichMedia(config: SeriesMapping) {
               mediaId: media.id,
               name: factionTitle,
               introducedAtChapter: Math.max(1, f.validFrom || introduced),
+              colorHex: FACTION_COLORS[hashString(`${media.id}:${factionTitle}`) % FACTION_COLORS.length],
             },
           });
         }
 
         const vFrom = Math.max(1, f.validFrom || introduced);
         const vUntil = f.validUntil !== null && f.validUntil > vFrom ? f.validUntil : null;
+
+        // Skip identical membership that already exists (idempotent re-runs)
+        const existingMembership = await prisma.factionMembership.findFirst({
+          where: {
+            factionId: faction.id,
+            characterId: dbChar.id,
+            validFrom: vFrom,
+          },
+        });
+        if (existingMembership) continue;
 
         // Create membership
         await prisma.factionMembership.create({
@@ -461,7 +413,7 @@ async function main() {
 
   console.log("Memulai Auto-Enrichment Pipeline untuk seluruh katalog...");
 
-  for (const config of SERIES_CONFIG) {
+  for (const config of await buildSeriesConfigs()) {
     if (targetId && config.anilistId !== targetId) continue;
     await enrichMedia(config);
   }

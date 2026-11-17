@@ -51,13 +51,14 @@ function findMainCharacterId(nodes: GraphNode[], edges: GraphResponse["edges"]):
     degreeMap.set(e.source, (degreeMap.get(e.source) || 0) + 1);
     degreeMap.set(e.target, (degreeMap.get(e.target) || 0) + 1);
   }
+  // Fallback: MC is usually the most connected character; earliest debut only breaks ties.
   const sorted = [...nodes].sort((a, b) => {
-    const dA = a.debutChapter ?? 1;
-    const dB = b.debutChapter ?? 1;
-    if (dA !== dB) return dA - dB;
     const degA = degreeMap.get(a.id) || 0;
     const degB = degreeMap.get(b.id) || 0;
-    return degB - degA;
+    if (degA !== degB) return degB - degA;
+    const dA = a.debutChapter ?? 1;
+    const dB = b.debutChapter ?? 1;
+    return dA - dB;
   });
   return sorted[0].id;
 }

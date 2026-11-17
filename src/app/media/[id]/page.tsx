@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, use } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import GraphCanvas from "@/components/GraphCanvas";
-import ChapterDropdown from "@/components/ChapterDropdown";
+import ChapterSlider from "@/components/ChapterSlider";
 import CharacterSearch from "@/components/CharacterSearch";
 import FloatingPanel from "@/components/FloatingPanel";
 import type { GraphResponse, GraphNode } from "@/lib/types";
@@ -61,9 +61,7 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
         if (!cancelled) {
           setData(json);
           // If the currently selected character is not visible at new chapter, unselect
-          if (selectedNodeId && !json.nodes.some((n) => n.id === selectedNodeId)) {
-            setSelectedNodeId(null);
-          }
+          setSelectedNodeId((prev) => (prev && !json.nodes.some((n) => n.id === prev) ? null : prev));
         }
       } catch (err) {
         console.error("Graph fetch error:", err);
@@ -75,7 +73,7 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
     return () => {
       cancelled = true;
     };
-  }, [mediaId, chapter, selectedNodeId]);
+  }, [mediaId, chapter]);
 
   // Keyboard navigation for chapters
   useEffect(() => {
@@ -148,10 +146,10 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
 
-        {/* Center: Chapter Dropdown */}
+        {/* Center: Chapter Slider */}
         <div className="flex items-center gap-2">
           {media && (
-            <ChapterDropdown
+            <ChapterSlider
               currentChapter={chapter}
               totalChapters={media.totalChapters}
               onChange={setChapter}
@@ -199,8 +197,7 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
             {data.factions.length > 0 && (
               <div className="absolute top-6 left-6 z-20 bg-[#111827]/90 backdrop-blur-md px-3 py-2 rounded-xl border border-[#1e293b] shadow-xl hidden md:flex items-center gap-3">
                 <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
-                  Faction Columns:
-                </span>
+                  Faction:</span>
                 <div className="flex items-center gap-2.5">
                   {data.factions.map((f) => (
                     <div key={f.id} className="flex items-center gap-1.5 text-xs text-slate-300">
