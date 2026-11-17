@@ -215,6 +215,13 @@ async function enrichMedia(config: SeriesMapping) {
       continue;
     }
 
+    // Idempotent: lewati karakter yang sudah punya deskripsi (hemat biaya LLM).
+    const existingDesc = await prisma.characterDescription.findFirst({ where: { characterId: dbChar.id } });
+    if (existingDesc) {
+      console.log(`[SKIP] ${charName} sudah berlore — lewati.`);
+      continue;
+    }
+
     let parsed: GeminiParsedCharacter | null = null;
 
     // A. Try fetching real Fandom wikitext

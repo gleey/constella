@@ -29,6 +29,8 @@ export interface GraphNode {
   status: GraphNodeStatus | null;
   description: GraphNodeDescription | null;
   factions: GraphNodeFaction[];
+  /** Punya lore (deskripsi/status/faksi) — dipakai GraphCanvas untuk lore gate. */
+  hasLore?: boolean;
 }
 
 export interface GraphEdge {

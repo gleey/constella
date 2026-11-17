@@ -122,15 +122,21 @@ export async function GET(
   }
 
   // ── Build nodes ──────────────────────────────────────────────────────
-  const nodes = characters.map((c) => ({
-    id: c.id,
-    name: c.name,
-    imageUrl: c.imageUrl,
-    debutChapter: c.introducedAtChapter,
-    status: statusByChar.get(c.id) ?? null,
-    description: descByChar.get(c.id) ?? null,
-    factions: membershipsByChar.get(c.id) ?? [],
-  }));
+  const nodes = characters.map((c) => {
+    const factions = membershipsByChar.get(c.id) ?? [];
+    const status = statusByChar.get(c.id) ?? null;
+    const description = descByChar.get(c.id) ?? null;
+    return {
+      id: c.id,
+      name: c.name,
+      imageUrl: c.imageUrl,
+      debutChapter: c.introducedAtChapter,
+      status,
+      description,
+      factions,
+      hasLore: Boolean(description || status || factions.length > 0),
+    };
+  });
 
   // ── Relationships (edges) — two-sided validation ─────────────────────
   // Both source AND target must be visible characters.

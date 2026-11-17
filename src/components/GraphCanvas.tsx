@@ -14,9 +14,6 @@ interface Props {
 }
 
 const UNAFFILIATED_ID = "__unaffiliated__";
-// Placeholder transparan: Cytoscape crash saat style "data(imageUrl)" dipetakan ke string kosong.
-const TRANSPARENT_IMG =
-  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
 const KNOWN_PROTAGONISTS = [
   "sung jinwoo",
@@ -24,10 +21,11 @@ const KNOWN_PROTAGONISTS = [
   "kim dokja",
   "dokja",
   "arthur leywin",
-  "arthur",
   "jaehwan",
-  "baam",
+  "twenty-fifth bam",
   "twenty-fifth baam",
+  "bam",
+  "baam",
   "shin youngwoo",
   "grid",
   "kang jinhyuk",
@@ -163,7 +161,10 @@ export default function GraphCanvas({
 
     let mcNode: GraphNode | null = null;
 
-    for (const node of data.nodes) {
+    // Lore gate: tanpa deskripsi/status/faksi → tidak dirender (masih bisa dicari).
+    const visibleNodes = data.nodes.filter((n) => n.hasLore || n.id === mainCharId);
+
+    for (const node of visibleNodes) {
       if (node.id === mainCharId) {
         mcNode = node;
         continue; // MC is placed at global center (0, 0)
@@ -202,7 +203,13 @@ export default function GraphCanvas({
           id: mcNode.id,
           label: mcNode.name, // Only name on canvas (PRD requirement)
           color: mcColor,
-          imageUrl: mcNode.imageUrl || TRANSPARENT_IMG,
+          hasImage: Boolean(
+            mcNode.imageUrl &&
+              (mcNode.imageUrl.startsWith("http://") ||
+                mcNode.imageUrl.startsWith("https://") ||
+                mcNode.imageUrl.startsWith("/")),
+          ),
+          imageUrl: mcNode.imageUrl || undefined,
           isCharacter: true,
           isMainCharacter: true,
         },
@@ -297,7 +304,13 @@ export default function GraphCanvas({
             label: node.name,
             primaryFactionId: UNAFFILIATED_ID,
             color: colorMap.get(UNAFFILIATED_ID) ?? "#818cf8",
-            imageUrl: node.imageUrl || TRANSPARENT_IMG,
+            hasImage: Boolean(
+              node.imageUrl &&
+                (node.imageUrl.startsWith("http://") ||
+                  node.imageUrl.startsWith("https://") ||
+                  node.imageUrl.startsWith("/")),
+            ),
+            imageUrl: node.imageUrl || undefined,
             isCharacter: true,
             isMainCharacter: false,
           },
@@ -419,7 +432,13 @@ export default function GraphCanvas({
               label: node.name,
               primaryFactionId: facId,
               color: fColor,
-              imageUrl: node.imageUrl || TRANSPARENT_IMG,
+              hasImage: Boolean(
+                node.imageUrl &&
+                  (node.imageUrl.startsWith("http://") ||
+                    node.imageUrl.startsWith("https://") ||
+                    node.imageUrl.startsWith("/")),
+              ),
+              imageUrl: node.imageUrl || undefined,
               isCharacter: true,
               isMainCharacter: false,
             },
@@ -498,9 +517,6 @@ export default function GraphCanvas({
           selector: "node[?isCharacter]",
           style: {
             "background-color": "#1e293b",
-            "background-image": "data(imageUrl)",
-            "background-fit": "cover",
-            "background-clip": "node",
             shape: "ellipse",
             label: "data(label)",
             color: "#f8fafc",
@@ -521,6 +537,15 @@ export default function GraphCanvas({
             "text-border-opacity": 0.4,
             "text-border-width": 1,
             "text-border-color": "data(color)",
+          },
+        },
+        // Character nodes with valid image
+        {
+          selector: "node[?hasImage]",
+          style: {
+            "background-image": "data(imageUrl)",
+            "background-fit": "cover",
+            "background-clip": "node",
           },
         },
         // Main Character node special highlight
