@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import cytoscape, { type Core, type NodeSingular } from "cytoscape";
+import { useEffect, useRef, useState } from "react";
+import cytoscape, { type Core } from "cytoscape";
 import type { GraphResponse, GraphFaction, GraphNode } from "@/lib/types";
 
 interface Props {
   data: GraphResponse;
-  /** Map of nodeId → {x,y} from previous render. Mutated in-place. */
-  positionCache: React.MutableRefObject<Map<string, { x: number; y: number }>>;
   onNodeClick: (nodeId: string) => void;
   selectedNodeId?: string | null;
   focusNodeId?: string | null;
@@ -72,6 +70,15 @@ function factionColorMap(factions: GraphFaction[]) {
   return m;
 }
 
+/** Fit ke karakter saja (bukan bubble faksi) dan pusatkan ke protagonist. */
+function fitGraph(cy: Core, mainCharId: string | null) {
+  const characters = cy.nodes("[?isCharacter]");
+  if (characters.length) cy.fit(characters, 70);
+  cy.zoom(Math.max(0.25, Math.min(1.15, cy.zoom())));
+  const anchor = mainCharId ? cy.getElementById(mainCharId) : characters;
+  if (anchor && anchor.length) cy.center(anchor);
+}
+
 /** Get primary faction ID for a character node. */
 function getPrimaryFactionId(node: GraphNode): string {
   const visible = node.factions?.find((f) => !f.isSensitive);
@@ -81,7 +88,6 @@ function getPrimaryFactionId(node: GraphNode): string {
 
 export default function GraphCanvas({
   data,
-  positionCache,
   onNodeClick,
   selectedNodeId,
   focusNodeId,
@@ -89,17 +95,6 @@ export default function GraphCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
-  const lastMediaIdRef = useRef<string | null>(null);
-
-  // Save character node positions before unmount / re-render
-  const savePositions = useCallback(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    cy.nodes("[?isCharacter]").forEach((n: NodeSingular) => {
-      const pos = n.position();
-      positionCache.current.set(n.id(), { x: pos.x, y: pos.y });
-    });
-  }, [positionCache]);
 
   // Handle focusNodeId changes (e.g. from search bar or related click)
   useEffect(() => {
@@ -140,12 +135,6 @@ export default function GraphCanvas({
     // Container must be attached to the DOM; otherwise cytoscape init
     // crashes internally (e.g. "can't access property 'value', p is null").
     if (!container || !container.isConnected) return;
-
-    // Reset position cache when navigating to a different series
-    if (lastMediaIdRef.current !== data.mediaId) {
-      positionCache.current.clear();
-      lastMediaIdRef.current = data.mediaId;
-    }
 
     setInitError(null);
     const colorMap = factionColorMap(data.factions);
@@ -195,7 +184,6 @@ export default function GraphCanvas({
       const mcColor = colorMap.get(mcFactionId) ?? "#818cf8";
 
       // Always fix MC at (0, 0) for pristine radial spokes
-      positionCache.current.set(mcNode.id, { x: 0, y: 0 });
 
       elements.push({
         group: "nodes",
@@ -217,93 +205,77 @@ export default function GraphCanvas({
       });
     }
 
-    // ── 3. Layout for Non-MC Characters ──────────────────────────────────
-    const isPurelyUnaffiliated =
-      activeFactionIds.length === 1 && activeFactionIds[0] === UNAFFILIATED_ID;
+    // ── 3. Radial sector layout ──────────────────────────────────────────
+    // MC tetap di tengah. Tiap faksi mendapat sektor sudut sama besar;
+    // anggotanya diurutkan berdasarkan chapter debut lalu nama dan diletakkan
+    // di busur konsentris. Posisi dihitung ulang tiap render (tanpa cache
+    // lintas chapter) supaya tidak campur aduk saat chapter bertambah.
+    const SECTOR_FILL = 0.74; // sisa ruang = jarak antar sektor faksi
+    const FIRST_RING = 230;
+    const RING_STEP = 135;
+    const NODE_SPACING = 118; // estimasi jarak antar node pada satu busur
 
-    if (isPurelyUnaffiliated) {
-      // When all characters are Independent (no factions defined yet), do NOT
-      // trap them in an off-center "INDEPENDENT" box. Instead, spread them in a
-      // clean 360-degree concentric radial constellation centered on the protagonist.
-      const members = factionMembers.get(UNAFFILIATED_ID) ?? [];
-      members.sort((a, b) => {
+    activeFactionIds.forEach((facId, facIdx) => {
+      const fMeta = data.factions.find((f) => f.id === facId);
+      const fName =
+        facId === UNAFFILIATED_ID ? "Independent" : fMeta?.name ?? "Faction";
+      const fColor = colorMap.get(facId) ?? "#818cf8";
+
+      const sectorSize = (2 * Math.PI) / Math.max(1, activeFactionIds.length);
+      const sectorCenter = -Math.PI / 2 + facIdx * sectorSize;
+      const usable = sectorSize * SECTOR_FILL;
+      const sectorStart = sectorCenter - usable / 2;
+
+      const members = [...(factionMembers.get(facId) ?? [])].sort((a, b) => {
         const dA = a.debutChapter ?? 1;
         const dB = b.debutChapter ?? 1;
         if (dA !== dB) return dA - dB;
         return a.name.localeCompare(b.name);
       });
 
-      const totalMembers = members.length;
-      const ringAssignments: { node: GraphNode; radius: number; angle: number }[] = [];
+      // Bubble faksi tetap dipakai sebagai pembatas warna kelompok.
+      elements.push({
+        group: "nodes",
+        data: {
+          id: `bubble_${facId}`,
+          label: fName.toUpperCase(),
+          color: fColor,
+          isFactionBubble: true,
+        },
+      });
 
-      if (totalMembers <= 10) {
-        // Single spacious ring: radius scales so nodes have >= 140px separation
-        const radius = Math.max(260, totalMembers * 36);
-        members.forEach((node, idx) => {
-          const angle = (2 * Math.PI * idx) / totalMembers - Math.PI / 2;
-          ringAssignments.push({ node, radius, angle });
-        });
-      } else if (totalMembers <= 22) {
-        // Two concentric rings: inner core for earlier debuts + outer perimeter
-        const innerCount = Math.min(8, Math.ceil(totalMembers / 2.5));
-        const outerCount = totalMembers - innerCount;
-        const rInner = 260;
-        const rOuter = 460;
-
-        for (let i = 0; i < innerCount; i++) {
-          const angle = (2 * Math.PI * i) / innerCount - Math.PI / 2;
-          ringAssignments.push({ node: members[i], radius: rInner, angle });
-        }
-        const offsetAngle = Math.PI / outerCount;
-        for (let j = 0; j < outerCount; j++) {
-          const angle = (2 * Math.PI * j) / outerCount - Math.PI / 2 + offsetAngle;
-          ringAssignments.push({ node: members[innerCount + j], radius: rOuter, angle });
-        }
-      } else {
-        // Three concentric rings for large casts (> 22 characters)
-        const ring1Count = 6;
-        const ring2Count = Math.min(12, Math.ceil((totalMembers - 6) / 2));
-        const ring3Count = totalMembers - ring1Count - ring2Count;
-        const r1 = 240;
-        const r2 = 440;
-        const r3 = 640;
-
-        for (let i = 0; i < ring1Count; i++) {
-          const angle = (2 * Math.PI * i) / ring1Count - Math.PI / 2;
-          ringAssignments.push({ node: members[i], radius: r1, angle });
-        }
-        for (let j = 0; j < ring2Count; j++) {
-          const angle = (2 * Math.PI * j) / ring2Count - Math.PI / 2 + Math.PI / ring2Count;
-          ringAssignments.push({ node: members[ring1Count + j], radius: r2, angle });
-        }
-        for (let k = 0; k < ring3Count; k++) {
-          const angle = (2 * Math.PI * k) / ring3Count - Math.PI / 2;
-          ringAssignments.push({ node: members[ring1Count + ring2Count + k], radius: r3, angle });
-        }
-      }
-
-      ringAssignments.forEach(({ node, radius, angle }) => {
-        let posX = Math.round(radius * Math.cos(angle));
-        let posY = Math.round(radius * Math.sin(angle));
-
-        const cached = positionCache.current.get(node.id);
-        if (cached) {
-          const dist = Math.sqrt(cached.x ** 2 + cached.y ** 2);
-          if (Math.abs(dist - radius) < 140) {
-            posX = cached.x;
-            posY = cached.y;
-          }
+      let ring = 0;
+      let slot = 0;
+      for (const node of members) {
+        let radius = FIRST_RING + ring * RING_STEP;
+        let capacity = Math.max(
+          1,
+          Math.floor((radius * usable) / NODE_SPACING),
+        );
+        while (slot >= capacity) {
+          ring += 1;
+          slot = 0;
+          radius = FIRST_RING + ring * RING_STEP;
+          capacity = Math.max(
+            1,
+            Math.floor((radius * usable) / NODE_SPACING),
+          );
         }
 
-        positionCache.current.set(node.id, { x: posX, y: posY });
+        const fraction = capacity === 1 ? 0.5 : (slot + 0.5) / capacity;
+        const angle = sectorStart + usable * fraction;
+        const posX = Math.round(radius * Math.cos(angle));
+        const posY = Math.round(radius * Math.sin(angle));
+        slot += 1;
 
         elements.push({
           group: "nodes",
           data: {
             id: node.id,
+            parent: `bubble_${facId}`,
             label: node.name,
-            primaryFactionId: UNAFFILIATED_ID,
-            color: colorMap.get(UNAFFILIATED_ID) ?? "#818cf8",
+            primaryFactionId: facId,
+            color: fColor,
             hasImage: Boolean(
               node.imageUrl &&
                 (node.imageUrl.startsWith("http://") ||
@@ -316,137 +288,8 @@ export default function GraphCanvas({
           },
           position: { x: posX, y: posY },
         });
-      });
-    } else {
-      // ── Faction Compound Clusters orbiting around (0, 0) ────────────────
-      const K = activeFactionIds.length;
-
-      // Calculate radius of each cluster to ensure adequate clearance
-      const clusterRadii = new Map<string, number>();
-      for (const facId of activeFactionIds) {
-        const mCount = factionMembers.get(facId)?.length ?? 0;
-        if (mCount <= 1) {
-          clusterRadii.set(facId, 50);
-        } else if (mCount <= 6) {
-          clusterRadii.set(facId, Math.max(90, 50 + mCount * 18));
-        } else {
-          const mIn = Math.min(5, Math.ceil(mCount / 3));
-          const mOut = mCount - mIn;
-          clusterRadii.set(facId, 90 + Math.max(80, mOut * 18));
-        }
       }
-
-      const maxClusterR = Math.max(...Array.from(clusterRadii.values()), 100);
-      const minOrbitForClearance = maxClusterR + 240;
-      const minOrbitForSeparation =
-        (2 * maxClusterR + 140) / (2 * Math.sin(Math.PI / Math.max(2, K)));
-      const ORBIT_RADIUS = Math.round(
-        Math.max(480, minOrbitForClearance, minOrbitForSeparation),
-      );
-
-      activeFactionIds.forEach((facId, idx) => {
-        const angle = (2 * Math.PI * idx) / Math.max(1, K) - Math.PI / 2;
-        const clusterCenterX = Math.round(ORBIT_RADIUS * Math.cos(angle));
-        const clusterCenterY = Math.round(ORBIT_RADIUS * Math.sin(angle));
-
-        const fMeta = data.factions.find((f) => f.id === facId);
-        const fName =
-          facId === UNAFFILIATED_ID
-            ? "Independent"
-            : fMeta?.name ?? "Faction";
-        const fColor = colorMap.get(facId) ?? "#818cf8";
-
-        // Compound Parent Bubble
-        elements.push({
-          group: "nodes",
-          data: {
-            id: `bubble_${facId}`,
-            label: fName.toUpperCase(),
-            color: fColor,
-            isFactionBubble: true,
-          },
-        });
-
-        const members = factionMembers.get(facId) ?? [];
-        members.sort((a, b) => {
-          const dA = a.debutChapter ?? 1;
-          const dB = b.debutChapter ?? 1;
-          if (dA !== dB) return dA - dB;
-          return a.name.localeCompare(b.name);
-        });
-
-        const memberCount = members.length;
-        const radius = clusterRadii.get(facId) ?? 90;
-
-        members.forEach((node, mIdx) => {
-          let posX = clusterCenterX;
-          let posY = clusterCenterY;
-
-          if (memberCount === 1) {
-            posX = clusterCenterX;
-            posY = clusterCenterY;
-          } else if (memberCount <= 6) {
-            const mAngle = (2 * Math.PI * mIdx) / memberCount - Math.PI / 2;
-            posX = Math.round(clusterCenterX + radius * Math.cos(mAngle));
-            posY = Math.round(clusterCenterY + radius * Math.sin(mAngle));
-          } else {
-            // Two sub-rings inside cluster to prevent node overlap
-            const innerCount = Math.min(5, Math.ceil(memberCount / 3));
-            const rInner = 85;
-            const rOuter = radius;
-
-            if (mIdx < innerCount) {
-              const mAngle = (2 * Math.PI * mIdx) / innerCount - Math.PI / 2;
-              posX = Math.round(clusterCenterX + rInner * Math.cos(mAngle));
-              posY = Math.round(clusterCenterY + rInner * Math.sin(mAngle));
-            } else {
-              const outIdx = mIdx - innerCount;
-              const outerCount = memberCount - innerCount;
-              const mAngle =
-                (2 * Math.PI * outIdx) / outerCount -
-                Math.PI / 2 +
-                Math.PI / outerCount;
-              posX = Math.round(clusterCenterX + rOuter * Math.cos(mAngle));
-              posY = Math.round(clusterCenterY + rOuter * Math.sin(mAngle));
-            }
-          }
-
-          const cached = positionCache.current.get(node.id);
-          if (cached) {
-            const distSq =
-              (cached.x - clusterCenterX) ** 2 +
-              (cached.y - clusterCenterY) ** 2;
-            if (distSq < (radius + 180) ** 2) {
-              posX = cached.x;
-              posY = cached.y;
-            }
-          }
-
-          positionCache.current.set(node.id, { x: posX, y: posY });
-
-          elements.push({
-            group: "nodes",
-            data: {
-              id: node.id,
-              parent: `bubble_${facId}`,
-              label: node.name,
-              primaryFactionId: facId,
-              color: fColor,
-              hasImage: Boolean(
-                node.imageUrl &&
-                  (node.imageUrl.startsWith("http://") ||
-                    node.imageUrl.startsWith("https://") ||
-                    node.imageUrl.startsWith("/")),
-              ),
-              imageUrl: node.imageUrl || undefined,
-              isCharacter: true,
-              isMainCharacter: false,
-            },
-            position: { x: posX, y: posY },
-          });
-        });
-      });
-    }
+    });
 
     // ── 4. Add Relationship Edges ─────────────────────────────────────────
     // Sanitize first: drop duplicate node ids and edges whose endpoints
@@ -477,7 +320,6 @@ export default function GraphCanvas({
 
     // Destroy previous instance
     if (cyRef.current) {
-      savePositions();
       cyRef.current.destroy();
       cyRef.current = null;
     }
@@ -637,12 +479,8 @@ export default function GraphCanvas({
       maxZoom: 2.5,
     });
 
-    // ── 5. Default Zoom Out & Centered on Protagonist ─────────────────────
-    cy.fit(undefined, 80);
-    const calculatedZoom = cy.zoom();
-    // Default zoom out ~25% so the radial galaxy breathes comfortably
-    cy.zoom(calculatedZoom * 0.75);
-    cy.center();
+    // ── 5. Fit & center pada protagonist ──────────────────────────────────
+    fitGraph(cy, mainCharId);
 
     // ── 6. Events ────────────────────────────────────────────────────────
     cy.on("tap", "node[?isCharacter]", (evt) => {
@@ -658,21 +496,18 @@ export default function GraphCanvas({
     }
 
     return () => {
-      savePositions();
       if (cyRef.current) {
         cyRef.current.destroy();
         cyRef.current = null;
       }
     };
-  }, [data, positionCache, onNodeClick, savePositions]);
+  }, [data, onNodeClick]);
 
   const handleZoomIn = () => cyRef.current?.zoom(cyRef.current.zoom() * 1.25);
   const handleZoomOut = () => cyRef.current?.zoom(cyRef.current.zoom() * 0.8);
   const handleFit = () => {
     if (!cyRef.current) return;
-    cyRef.current.fit(undefined, 80);
-    cyRef.current.zoom(cyRef.current.zoom() * 0.75);
-    cyRef.current.center();
+    fitGraph(cyRef.current, findMainCharacterId(data.nodes, data.edges));
   };
 
   return (

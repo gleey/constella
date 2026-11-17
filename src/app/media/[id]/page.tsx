@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, use } from "react";
+import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import GraphCanvas from "@/components/GraphCanvas";
@@ -28,9 +28,6 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
   const [loading, setLoading] = useState(true);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
-
-  // Persistent position cache so nodes stay put across chapter changes
-  const positionCache = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   // Fetch media details
   useEffect(() => {
@@ -193,7 +190,6 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
           <>
             <GraphCanvas
               data={data}
-              positionCache={positionCache}
               onNodeClick={(id) => {
                 setSelectedNodeId(id);
                 setFocusNodeId(id);
