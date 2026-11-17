@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface ChapterSliderProps {
   currentChapter: number;
@@ -18,6 +18,46 @@ export default function ChapterSlider({
   const [showJump, setShowJump] = useState(false);
   const [jumpVal, setJumpVal] = useState("");
 
+  // Nilai sementara selama slider di-hold/digeser. onChange baru dipanggil
+  // saat jari/mouse dilepas, supaya grafik tidak refetch di setiap pixel
+  // (yang tadinya men-disable slider di tengah drag).
+  const [draft, setDraftState] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const draftRef = useRef<number | null>(null);
+
+  const setDraft = (value: number | null) => {
+    draftRef.current = value;
+    setDraftState(value);
+  };
+
+  const finishDrag = useCallback(() => {
+    const value = draftRef.current;
+    draftRef.current = null;
+    setDraftState(null);
+    if (value !== null && value !== currentChapter) onChange(value);
+  }, [currentChapter, onChange]);
+
+  // Lepas mouse/jari di luar slider tetap menyelesaikan drag.
+  useEffect(() => {
+    if (!isDragging) return;
+    const end = () => {
+      setIsDragging(false);
+      finishDrag();
+    };
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [isDragging, finishDrag]);
+
+  // Ganti seri → buang draft dari seri sebelumnya.
+  useEffect(() => {
+    draftRef.current = null;
+    setDraftState(null);
+  }, [totalChapters]);
+
   const clamp = (val: number) => Math.min(totalChapters, Math.max(1, val));
 
   const handleJumpSubmit = (e: React.FormEvent) => {
@@ -30,9 +70,10 @@ export default function ChapterSlider({
     }
   };
 
-  // Progress fill for the range track
+  // Progress fill for the range track (ikuti draft saat sedang digeser)
+  const shownChapter = draft ?? currentChapter;
   const pct =
-    totalChapters > 1 ? ((currentChapter - 1) / (totalChapters - 1)) * 100 : 0;
+    totalChapters > 1 ? ((shownChapter - 1) / (totalChapters - 1)) * 100 : 0;
 
   const navBtn =
     "w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 hover:bg-white/10 ring-1 ring-white/10 hover:ring-indigo-500/50 disabled:opacity-40 disabled:pointer-events-none text-slate-300 hover:text-white transition-colors cursor-pointer";
@@ -59,9 +100,13 @@ export default function ChapterSlider({
           type="range"
           min={1}
           max={totalChapters}
-          value={currentChapter}
+          value={shownChapter}
           disabled={disabled}
-          onChange={(e) => onChange(parseInt(e.target.value, 10))}
+          onPointerDown={() => setIsDragging(true)}
+          onChange={(e) => setDraft(parseInt(e.target.value, 10))}
+          onPointerUp={finishDrag}
+          onKeyUp={finishDrag}
+          onBlur={finishDrag}
           className="chapter-range flex-1 cursor-pointer"
           style={{
             background: `linear-gradient(to right, #6366f1 0%, #818cf8 ${pct}%, #1b2436 ${pct}%, #1b2436 100%)`,
@@ -69,7 +114,7 @@ export default function ChapterSlider({
           aria-label="Chapter"
         />
         <span className="text-xs font-mono font-bold text-white bg-white/5 ring-1 ring-white/10 rounded-md px-2 py-0.5 min-w-[7ch] text-center">
-          {currentChapter}/{totalChapters}
+          {shownChapter}/{totalChapters}
         </span>
       </div>
 

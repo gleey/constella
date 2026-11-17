@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Spoiler-Free Character Map",
-  description: "Explore manga & manhwa character relationships without spoilers",
+  title: "Constella — Zero-Spoiler Character Map",
+  description:
+    "Explore manga & manhwa character relationships chapter by chapter, without spoilers",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

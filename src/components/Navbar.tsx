@@ -18,11 +18,10 @@ export default function Navbar() {
         <div className="flex items-center gap-7">
           <Link href="/" className="flex items-center gap-2.5">
             <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#6366f1] to-[#8b5cf6] text-white flex items-center justify-center text-[13px] font-black shadow-lg shadow-indigo-950/40 ring-1 ring-white/10">
-              SF
+              C
             </span>
             <span className="text-white font-bold tracking-tight text-base sm:text-lg">
-              SpoilerFree{" "}
-              <span className="text-[#818cf8] font-semibold">Map</span>
+              Constella
             </span>
           </Link>
 

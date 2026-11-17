@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -144,6 +144,17 @@ export default function HomePage() {
     loadMedia();
   }, []);
 
+  // Featured rail tampil acak tiap kali halaman dibuka, tanpa mengubah
+  // urutan katalog di bawah (tetap urutan API).
+  const featuredMedia = useMemo(() => {
+    const list = [...mediaList];
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
+    return list;
+  }, [mediaList]);
+
   // Filter list
   const filteredMedia = mediaList.filter((m) => {
     const matchesSearch =
@@ -241,7 +252,7 @@ export default function HomePage() {
               className="flex items-stretch gap-4 overflow-x-auto scroll-smooth no-scrollbar py-2 px-0.5"
               style={{ scrollSnapType: "x mandatory" }}
             >
-              {mediaList.map((item) => {
+              {featuredMedia.map((item) => {
                 const meta = MEDIA_META[item.title];
                 return (
                   <Link
