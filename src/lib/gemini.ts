@@ -365,7 +365,7 @@ export async function parseCharacterWikitext(
   const openrouterApiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey && !groqApiKey && !openrouterApiKey) {
-    throw new Error("Neither GEMINI_API_KEY nor GROQ_API_KEY is configured");
+    throw new Error("Neither GEMINI_API_KEY nor GROQ_API_KEY nor OPENROUTER_API_KEY is configured");
   }
 
   const models = getGeminiModels();
