@@ -26,6 +26,16 @@ export function getGroqModels(): string[] {
     .filter(Boolean);
 }
 
+// Gemma models via Gemini API (Order 4 fallback, using same GEMINI_API_KEY).
+// Automatically strips "gemini/" or "models/" prefixes if present.
+export function getGemmaModels(): string[] {
+  const envModel = process.env.GEMMA_MODEL || "gemini/gemma-4-31b-it, gemini/gemma-4-26b-a4b-it";
+  return envModel
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+}
+
 export interface GeminiParsedCharacter {
   introducedAtChapter: number;
   descriptions: {
@@ -355,8 +365,59 @@ ${compactWikitext}`;
 }
 
 /**
- * Pemanggilan OpenRouter dengan rantai model. Digunakan untuk order 3
- * (openrouter/free) dan order 4 (gemini/gemma-*) dengan API Key yang sama.
+ * Pemanggilan Google GenAI SDK (Gemini & Gemma).
+ * Digunakan untuk order 1 (Gemini utama) dan order 4 (Gemini Gemma).
+ */
+async function parseWithGoogleGenAI(
+  ai: GoogleGenAI,
+  models: string[],
+  characterName: string,
+  userPrompt: string,
+  totalChapters: number,
+  label: string,
+): Promise<GeminiParsedCharacter> {
+  let lastErr: unknown = null;
+  for (let i = 0; i < models.length; i++) {
+    const rawModel = models[i];
+    const model = rawModel.replace(/^(gemini\/|models\/)/, "");
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`[${label}] Ekstraksi untuk ${characterName} dengan ${model} (attempt ${attempt})...`);
+        const response = await ai.models.generateContent({
+          model,
+          contents: userPrompt,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            temperature: 0.2,
+            responseMimeType: "application/json",
+            responseJsonSchema: GEMINI_CHARACTER_SCHEMA,
+          },
+        });
+
+        const text = response.text?.trim() ?? "";
+        const parsed = JSON.parse(text);
+        const normalized = normalizeGeminiOutput(parsed, totalChapters);
+        console.log(`[${label}] Berhasil: ${characterName} (${normalized.descriptions.length} desc phases, ${normalized.relationships.length} relations)`);
+        return normalized;
+      } catch (err: any) {
+        console.warn(`[${label}] Model ${model} attempt ${attempt} gagal: ${err.message || String(err)}`);
+        lastErr = err;
+        if (err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED") || String(err).includes("429")) {
+          console.log(`[${label}-Quota] Model ${model} kena 429. Lanjut ke model berikut...`);
+          await new Promise((r) => setTimeout(r, 2000));
+          break;
+        }
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
+    }
+  }
+  throw new Error(`Semua model ${label} gagal untuk ${characterName}. Error terakhir: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+}
+
+/**
+ * Pemanggilan OpenRouter dengan rantai model (Order 3).
  */
 async function parseWithOpenRouter(
   models: string[],
@@ -415,7 +476,6 @@ export async function parseCharacterWikitext(
     throw new Error("Neither GEMINI_API_KEY nor GROQ_API_KEY nor OPENROUTER_API_KEY is configured");
   }
 
-  const models = getGeminiModels();
   const userPrompt = `Character: ${characterName}
 Chapter numbering system: ${chapterNumberingSource}
 Total chapters in series: ${totalChapters}
@@ -424,50 +484,20 @@ Raw wikitext:
 ${wikitext}`;
 
   let lastError: unknown;
+  const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-  if (apiKey) {
-    const ai = new GoogleGenAI({ apiKey });
-    for (let i = 0; i < models.length; i++) {
-      const model = models[i];
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          console.log(`[Gemini] Ekstraksi untuk ${characterName} dengan ${model} (attempt ${attempt})...`);
-          const response = await ai.models.generateContent({
-            model,
-            contents: userPrompt,
-            config: {
-              systemInstruction: SYSTEM_INSTRUCTION,
-              temperature: 0.2,
-              responseMimeType: "application/json",
-              responseJsonSchema: GEMINI_CHARACTER_SCHEMA,
-            },
-          });
-
-          const text = response.text?.trim() ?? "";
-          const parsed = JSON.parse(text);
-          const normalized = normalizeGeminiOutput(parsed, totalChapters);
-          console.log(`[Gemini] Berhasil: ${characterName} (${normalized.descriptions.length} desc phases, ${normalized.relationships.length} relations)`);
-          return normalized;
-        } catch (err: any) {
-          console.warn(`[Gemini] Model ${model} attempt ${attempt} gagal: ${err.message || String(err)}`);
-          lastError = err;
-          // If quota rate limit (429), move to the NEXT Gemini model in the chain
-          // instead of abandoning all remaining Gemini models.
-          if (err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED") || String(err).includes("429")) {
-            console.log(`[Gemini-Quota] Model ${model} kena 429. Lanjut ke model Gemini berikut...`);
-            await new Promise((r) => setTimeout(r, 2000));
-            break;
-          }
-          if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 1500));
-          }
-        }
-      }
+  // 1. Order 1: Primary Gemini models via GEMINI_API_KEY
+  if (ai) {
+    const models = getGeminiModels();
+    try {
+      return await parseWithGoogleGenAI(ai, models, characterName, userPrompt, totalChapters, "Gemini");
+    } catch (err: any) {
+      console.warn(`[Gemini] Semua model Gemini utama gagal. Beralih ke fallback...`);
+      lastError = err;
     }
   }
 
-  // Fallback: Groq model chain (see getGroqModels) — only reached
-  // after ALL Gemini models in the chain have been tried.
+  // 2. Order 2: Groq model chain via GROQ_API_KEY
   if (groqApiKey) {
     const groqModels = getGroqModels();
     console.log(`[LLM-Fallback] Mengalihkan ke Groq (${groqModels.join(" -> ")})...`);
@@ -479,9 +509,12 @@ ${wikitext}`;
     }
   }
 
-  // Fallback order 3: OpenRouter model chain — only reached after Gemini and Groq fail.
+  // 3. Order 3: OpenRouter model chain via OPENROUTER_API_KEY
   if (openrouterApiKey) {
-    const openrouterModels = (process.env.OPENROUTER_MODEL || "openrouter/free").split(",").map((m) => m.trim()).filter(Boolean);
+    const openrouterModels = (process.env.OPENROUTER_MODEL || "openrouter/free")
+      .split(",")
+      .map((m) => m.trim())
+      .filter(Boolean);
     console.log(`[LLM-Fallback] Mengalihkan ke OpenRouter (${openrouterModels.join(" -> ")})...`);
     try {
       return await parseWithOpenRouter(openrouterModels, openrouterApiKey, characterName, userPrompt, totalChapters);
@@ -489,17 +522,19 @@ ${wikitext}`;
       console.warn(`[OpenRouter-Fallback] Gagal memproses dengan OpenRouter: ${openrouterErr.message}`);
       lastError = openrouterErr;
     }
+  }
 
-    // Fallback order 4: Gemini Gemma models via OpenRouter (same API key).
-    const gemmaModels = ["gemini/gemma-4-31b-it", "gemini/gemma-4-26b-a4b-it"];
+  // 4. Order 4: Gemini Gemma models via GEMINI_API_KEY (same Gemini API key)
+  if (ai) {
+    const gemmaModels = getGemmaModels();
     console.log(`[LLM-Fallback] Mengalihkan ke Gemini Gemma (${gemmaModels.join(" -> ")})...`);
     try {
-      return await parseWithOpenRouter(gemmaModels, openrouterApiKey, characterName, userPrompt, totalChapters);
+      return await parseWithGoogleGenAI(ai, gemmaModels, characterName, userPrompt, totalChapters, "Gemini-Gemma");
     } catch (gemmaErr: any) {
       console.warn(`[Gemma-Fallback] Gagal memproses dengan Gemini Gemma: ${gemmaErr.message}`);
       lastError = gemmaErr;
     }
   }
 
-  throw new Error(`Semua provider LLM (Gemini, Groq, OpenRouter) gagal. Error terakhir: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+  throw new Error(`Semua provider LLM (1. Gemini, 2. Groq, 3. OpenRouter, 4. Gemini Gemma) gagal. Error terakhir: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
