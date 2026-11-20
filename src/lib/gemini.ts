@@ -354,6 +354,53 @@ ${compactWikitext}`;
   throw new Error(`Semua model Groq gagal untuk ${characterName}. Error terakhir: ${lastModelError instanceof Error ? lastModelError.message : String(lastModelError)}`);
 }
 
+/**
+ * Pemanggilan OpenRouter dengan rantai model. Digunakan untuk order 3
+ * (openrouter/free) dan order 4 (gemini/gemma-*) dengan API Key yang sama.
+ */
+async function parseWithOpenRouter(
+  models: string[],
+  apiKey: string,
+  characterName: string,
+  userPrompt: string,
+  totalChapters: number,
+): Promise<GeminiParsedCharacter> {
+  for (const model of models) {
+    console.log(`[OpenRouter-Fallback] Memproses ${characterName} menggunakan ${model}...`);
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: SYSTEM_INSTRUCTION },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.2,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn(`[OpenRouter-Fallback] Model ${model} gagal (${response.status}). Beralih ke model berikutnya...`);
+      continue;
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "{}";
+    const parsed = JSON.parse(content);
+    const normalized = normalizeGeminiOutput(parsed, totalChapters);
+    console.log(`[OpenRouter-Fallback] Berhasil: ${characterName} (${normalized.descriptions.length} desc phases, ${normalized.relationships.length} relations)`);
+    return normalized;
+  }
+
+  throw new Error(`Semua model OpenRouter gagal untuk ${characterName}.`);
+}
+
 export async function parseCharacterWikitext(
   wikitext: string,
   characterName: string,
@@ -432,44 +479,26 @@ ${wikitext}`;
     }
   }
 
-  // Fallback: OpenRouter model chain — only reached after Gemini and Groq fail.
+  // Fallback order 3: OpenRouter model chain — only reached after Gemini and Groq fail.
   if (openrouterApiKey) {
     const openrouterModels = (process.env.OPENROUTER_MODEL || "openrouter/free").split(",").map((m) => m.trim()).filter(Boolean);
     console.log(`[LLM-Fallback] Mengalihkan ke OpenRouter (${openrouterModels.join(" -> ")})...`);
-    for (const openrouterModel of openrouterModels) {
-      console.log(`[OpenRouter-Fallback] Memproses ${characterName} menggunakan ${openrouterModel}...`);
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${openrouterApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: openrouterModel,
-          messages: [
-            { role: "system", content: SYSTEM_INSTRUCTION },
-            { role: "user", content: userPrompt },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.2,
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.warn(`[OpenRouter-Fallback] Model ${openrouterModel} gagal (${response.status}). Beralih ke model berikutnya...`);
-        continue;
-      }
-
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || "{}";
-      const parsed = JSON.parse(content);
-      const normalized = normalizeGeminiOutput(parsed, totalChapters);
-      console.log(`[OpenRouter-Fallback] Berhasil: ${characterName} (${normalized.descriptions.length} desc phases, ${normalized.relationships.length} relations)`);
-      return normalized;
+    try {
+      return await parseWithOpenRouter(openrouterModels, openrouterApiKey, characterName, userPrompt, totalChapters);
+    } catch (openrouterErr: any) {
+      console.warn(`[OpenRouter-Fallback] Gagal memproses dengan OpenRouter: ${openrouterErr.message}`);
+      lastError = openrouterErr;
     }
 
-    throw new Error(`Semua model OpenRouter gagal untuk ${characterName}.`);
+    // Fallback order 4: Gemini Gemma models via OpenRouter (same API key).
+    const gemmaModels = ["gemini/gemma-4-31b-it", "gemini/gemma-4-26b-a4b-it"];
+    console.log(`[LLM-Fallback] Mengalihkan ke Gemini Gemma (${gemmaModels.join(" -> ")})...`);
+    try {
+      return await parseWithOpenRouter(gemmaModels, openrouterApiKey, characterName, userPrompt, totalChapters);
+    } catch (gemmaErr: any) {
+      console.warn(`[Gemma-Fallback] Gagal memproses dengan Gemini Gemma: ${gemmaErr.message}`);
+      lastError = gemmaErr;
+    }
   }
 
   throw new Error(`Semua provider LLM (Gemini, Groq, OpenRouter) gagal. Error terakhir: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
