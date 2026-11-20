@@ -9,6 +9,7 @@ import { fetchPopularMedia, fetchMediaDetail, type CharacterDetail } from "./ani
 import { resolveFandomWikiSubdomain, fetchCharacterImage, fetchFandomCategoryCharacters } from "./fandom";
 import { resolveCharacterName } from "./name-resolution";
 import { normalizeName } from "./name-dedupe";
+import { fetchLiveChapterCount } from "./live-chapters";
 
 export interface SyncResultItem {
   id: string;
@@ -53,6 +54,12 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
       console.log(`[AutoSync] Processing "${item.title}" (AniList ID: ${item.id})...`);
       const detail = await fetchMediaDetail(item.id);
 
+      let resolvedChapters = detail.chapters && detail.chapters > 0 ? detail.chapters : 0;
+      if (!resolvedChapters) {
+        const live = await fetchLiveChapterCount(detail.title);
+        resolvedChapters = live && live > 0 ? live : 100;
+      }
+
       // 1. Upsert Media with verified live cover and chapter counts
       const media = await prisma.media.upsert({
         where: { anilistId: detail.id },
@@ -61,14 +68,14 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
           title: detail.title,
           type: detail.countryOfOrigin === "KR" ? "MANHWA" : "MANGA",
           coverImage: detail.coverImage,
-          totalChapters: detail.chapters || 100,
+          totalChapters: resolvedChapters,
           chapterNumberingSource: "official_en",
           countryOfOrigin: detail.countryOfOrigin || "KR",
         },
         update: {
           title: detail.title,
           coverImage: detail.coverImage,
-          totalChapters: detail.chapters && detail.chapters > 0 ? detail.chapters : undefined,
+          totalChapters: resolvedChapters !== 100 ? resolvedChapters : undefined,
         },
       });
 

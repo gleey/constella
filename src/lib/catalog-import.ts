@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { fetchPopularMediaPage } from "@/lib/anilist";
+import { fetchLiveChapterCount } from "@/lib/live-chapters";
 
 export interface CatalogImportResult {
   imported: number;
@@ -103,24 +104,34 @@ async function runImport({
               return;
             }
 
-            const chapters =
+            let chapters =
               typeof item.chapters === "number" && item.chapters > 0
                 ? item.chapters
-                : 100;
+                : 0;
+
+            if (!chapters) {
+              const live = await fetchLiveChapterCount(item.title);
+              chapters = live && live > 0 ? live : 100;
+            }
 
             try {
               const existing = await prisma.media.findUnique({
                 where: { anilistId: item.id },
-                select: { id: true },
+                select: { id: true, totalChapters: true },
               });
 
               if (existing) {
+                const resolvedChapters =
+                  chapters === 100 && existing.totalChapters > 100
+                    ? existing.totalChapters
+                    : chapters;
+
                 await prisma.media.update({
                   where: { id: existing.id },
                   data: {
                     title: item.title,
                     coverImage: cover,
-                    totalChapters: chapters,
+                    totalChapters: resolvedChapters,
                     status: item.status,
                     contentRating: item.contentRating,
                     genres: item.genres,

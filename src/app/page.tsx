@@ -146,6 +146,50 @@ export default function HomePage() {
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
   const carouselRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartScrollLeft = useRef(0);
+  const isDragThresholdPassed = useRef(false);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    if (!carouselRef.current) return;
+
+    isDraggingRef.current = true;
+    isDragThresholdPassed.current = false;
+    dragStartX.current = e.clientX;
+    dragStartScrollLeft.current = carouselRef.current.scrollLeft;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+
+    setIsDragging(true);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current || !carouselRef.current) return;
+    const deltaX = e.clientX - dragStartX.current;
+    if (Math.abs(deltaX) > 5) {
+      isDragThresholdPassed.current = true;
+    }
+    carouselRef.current.scrollLeft = dragStartScrollLeft.current - deltaX;
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {}
+    setIsDragging(false);
+    setTimeout(() => {
+      isDragThresholdPassed.current = false;
+    }, 50);
+  };
 
   useEffect(() => {
     async function loadMedia() {
@@ -166,8 +210,9 @@ export default function HomePage() {
 
   // Featured rail tampil acak tiap kali halaman dibuka, tanpa mengubah
   // urutan katalog di bawah (tetap urutan API).
+  // Sembunyikan konten suggestive / 18+ dari Featured Today.
   const featuredMedia = useMemo(() => {
-    const list = [...mediaList];
+    const list = mediaList.filter((m) => m.contentRating !== "SUGGESTIVE_18");
     for (let i = list.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [list[i], list[j]] = [list[j], list[i]];
@@ -277,8 +322,14 @@ export default function HomePage() {
           ) : mediaList.length > 0 ? (
             <div
               ref={carouselRef}
-              className="flex items-stretch gap-4 overflow-x-auto scroll-smooth no-scrollbar py-2 px-0.5"
-              style={{ scrollSnapType: "x mandatory" }}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              className={`flex items-stretch gap-4 overflow-x-auto no-scrollbar py-2 px-0.5 select-none touch-pan-x ${
+                isDragging ? "cursor-grabbing scroll-auto" : "cursor-grab scroll-smooth"
+              }`}
+              style={{ scrollSnapType: isDragging ? "none" : "x mandatory" }}
             >
               {featuredMedia.map((item) => {
                 const meta = MEDIA_META[item.title];
@@ -286,6 +337,13 @@ export default function HomePage() {
                   <Link
                     key={item.id}
                     href={`/media/${item.id}`}
+                    onClick={(e) => {
+                      if (isDragThresholdPassed.current) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    }}
+                    draggable={false}
                     style={{ scrollSnapAlign: "start" }}
                     className="w-64 sm:w-72 shrink-0 flex flex-col rounded-2xl overflow-hidden bg-[#111827] ring-1 ring-white/5 hover:ring-indigo-500/60 hover:-translate-y-1 transition-all duration-300 shadow-lg shadow-black/40 hover:shadow-2xl hover:shadow-black/60 group cursor-pointer"
                   >
@@ -296,7 +354,8 @@ export default function HomePage() {
                           src={item.coverImage}
                           alt={item.title}
                           fill
-                          className="object-cover group-hover:scale-105 transition-transform duration-500"
+                          draggable={false}
+                          className="object-cover group-hover:scale-105 transition-transform duration-500 pointer-events-none"
                           unoptimized
                         />
                       ) : (
