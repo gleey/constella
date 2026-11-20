@@ -16,6 +16,9 @@ model Media {
   totalChapters          Int
   chapterNumberingSource String         // "official_en" | "raw_kr" | "scanlation" etc.
   countryOfOrigin        String
+  status                 String         @default("RELEASING") // RELEASING | FINISHED | CANCELLED | HIATUS
+  contentRating          String         @default("SAFE")      // SAFE | SUGGESTIVE_18
+  genres                 String[]       @default([])
   characters             Character[]
   relationships          Relationship[]
   factions               Faction[]

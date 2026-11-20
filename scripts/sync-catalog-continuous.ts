@@ -93,6 +93,9 @@ async function runCatalogCycle() {
                 title: item.title,
                 coverImage: item.coverImage,
                 totalChapters: chapters,
+                status: item.status,
+                contentRating: item.contentRating,
+                genres: item.genres,
               },
             });
             updateCount++;
@@ -106,6 +109,9 @@ async function runCatalogCycle() {
                 totalChapters: chapters,
                 chapterNumberingSource: "anilist",
                 countryOfOrigin: country,
+                status: item.status,
+                contentRating: item.contentRating,
+                genres: item.genres,
               },
             });
             newCount++;

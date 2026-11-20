@@ -12,6 +12,9 @@ interface MediaItem {
   totalChapters: number;
   chapterNumberingSource: string;
   countryOfOrigin: string;
+  status?: string;
+  contentRating?: "SAFE" | "SUGGESTIVE_18" | string;
+  genres?: string[];
 }
 
 // Curated metadata for presentation
@@ -123,7 +126,9 @@ function SearchIcon({ className }: { className?: string }) {
 export default function HomePage() {
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
   const [search, setSearch] = useState("");
-  const [selectedFilter, setSelectedFilter] = useState<string>("ALL");
+  const [selectedType, setSelectedType] = useState<string>("ALL");
+  const [selectedRating, setSelectedRating] = useState<string>("ALL");
+  const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
   const carouselRef = useRef<HTMLDivElement>(null);
 
@@ -144,6 +149,37 @@ export default function HomePage() {
     loadMedia();
   }, []);
 
+  // Compute category counts
+  const counts = useMemo(() => {
+    let safe = 0;
+    let suggestive = 0;
+    let releasing = 0;
+    let finished = 0;
+    let manhwa = 0;
+    let manga = 0;
+
+    for (const m of mediaList) {
+      if (m.type === "MANHWA") manhwa++;
+      else if (m.type === "MANGA") manga++;
+
+      if (m.contentRating === "SUGGESTIVE_18") suggestive++;
+      else safe++;
+
+      if (m.status === "RELEASING") releasing++;
+      else if (m.status === "FINISHED") finished++;
+    }
+
+    return {
+      total: mediaList.length,
+      manhwa,
+      manga,
+      safe,
+      suggestive,
+      releasing,
+      finished,
+    };
+  }, [mediaList]);
+
   // Featured rail tampil acak tiap kali halaman dibuka, tanpa mengubah
   // urutan katalog di bawah (tetap urutan API).
   const featuredMedia = useMemo(() => {
@@ -155,18 +191,33 @@ export default function HomePage() {
     return list;
   }, [mediaList]);
 
-  // Filter list
-  const filteredMedia = mediaList.filter((m) => {
-    const matchesSearch =
-      m.title.toLowerCase().includes(search.toLowerCase()) ||
-      m.type.toLowerCase().includes(search.toLowerCase());
+  // Filter list by Type, Search, Content Rating, and Release Status
+  const filteredMedia = useMemo(() => {
+    return mediaList.filter((m) => {
+      // Search
+      if (search.trim()) {
+        const query = search.toLowerCase();
+        const matchesTitle = m.title.toLowerCase().includes(query);
+        const matchesType = m.type.toLowerCase().includes(query);
+        const matchesGenres = m.genres?.some((g) => g.toLowerCase().includes(query));
+        if (!matchesTitle && !matchesType && !matchesGenres) return false;
+      }
 
-    if (!matchesSearch) return false;
-    if (selectedFilter === "ALL") return true;
-    if (selectedFilter === "MANHWA") return m.type === "MANHWA";
-    if (selectedFilter === "MANGA") return m.type === "MANGA";
-    return true;
-  });
+      // Type filter
+      if (selectedType === "MANHWA" && m.type !== "MANHWA") return false;
+      if (selectedType === "MANGA" && m.type !== "MANGA") return false;
+
+      // Content Rating filter: "Safe" vs "Suggestive / 18+"
+      if (selectedRating === "SAFE" && m.contentRating === "SUGGESTIVE_18") return false;
+      if (selectedRating === "SUGGESTIVE_18" && m.contentRating !== "SUGGESTIVE_18") return false;
+
+      // Release Status filter: "Releasing" vs "Finished"
+      if (selectedStatus === "RELEASING" && m.status !== "RELEASING") return false;
+      if (selectedStatus === "FINISHED" && m.status !== "FINISHED") return false;
+
+      return true;
+    });
+  }, [mediaList, search, selectedType, selectedRating, selectedStatus]);
 
   const scrollLeft = () => {
     if (carouselRef.current) {
@@ -182,9 +233,9 @@ export default function HomePage() {
 
   const tabs = ["ALL", "MANHWA", "MANGA"] as const;
   const tabLabels: Record<string, string> = {
-    ALL: `All (${mediaList.length})`,
-    MANHWA: "Manhwa",
-    MANGA: "Manga",
+    ALL: `All (${counts.total})`,
+    MANHWA: `Manhwa (${counts.manhwa})`,
+    MANGA: `Manga (${counts.manga})`,
   };
 
   return (
@@ -340,39 +391,22 @@ export default function HomePage() {
         id="catalog"
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-14 flex-1 w-full"
       >
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-5 mb-9">
-          <div>
-            <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-              Manga &amp; Manhwa Catalog
-            </h2>
-            <p className="text-sm text-slate-400 mt-1.5">
-              Select any story map to explore chapter-by-chapter character journeys
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-            {/* Filter tabs */}
-            <div className="flex items-center p-1 bg-white/[0.04] ring-1 ring-white/10 rounded-full text-xs font-semibold text-slate-400">
-              {tabs.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setSelectedFilter(t)}
-                  className={`px-3.5 py-1.5 rounded-full transition cursor-pointer ${
-                    selectedFilter === t
-                      ? "bg-indigo-500/20 text-[#c7d2fe] ring-1 ring-indigo-500/40"
-                      : "hover:text-slate-200"
-                  }`}
-                >
-                  {tabLabels[t]}
-                </button>
-              ))}
+        <div className="flex flex-col gap-6 mb-8">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-5">
+            <div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+                Manga &amp; Manhwa Catalog
+              </h2>
+              <p className="text-sm text-slate-400 mt-1.5">
+                Select any story map to explore chapter-by-chapter character journeys ({filteredMedia.length} of {mediaList.length} titles)
+              </p>
             </div>
 
             {/* Search input */}
-            <div className="relative flex-1 md:w-64">
+            <div className="relative w-full md:w-72">
               <input
                 type="text"
-                placeholder="Search title..."
+                placeholder="Search title, genre..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full h-10 pl-9 pr-9 bg-white/[0.04] ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-500/60 rounded-full text-xs text-white placeholder-slate-500 focus:outline-none transition"
@@ -391,6 +425,93 @@ export default function HomePage() {
               )}
             </div>
           </div>
+
+          {/* Filter Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-white/[0.02] ring-1 ring-white/10">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Type filter tabs */}
+              <div className="flex items-center p-1 bg-white/[0.04] ring-1 ring-white/10 rounded-full text-xs font-semibold text-slate-400">
+                {tabs.map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setSelectedType(t)}
+                    className={`px-3 py-1 rounded-full transition cursor-pointer ${
+                      selectedType === t
+                        ? "bg-indigo-500/20 text-[#c7d2fe] ring-1 ring-indigo-500/40"
+                        : "hover:text-slate-200"
+                    }`}
+                  >
+                    {tabLabels[t]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Release Status filter */}
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-[11px] font-medium text-slate-400 ml-1">Status:</span>
+                <div className="flex items-center p-1 bg-white/[0.04] ring-1 ring-white/10 rounded-full font-semibold text-slate-400">
+                  {[
+                    { id: "ALL", label: "All" },
+                    { id: "RELEASING", label: `Releasing (${counts.releasing})` },
+                    { id: "FINISHED", label: `Finished (${counts.finished})` },
+                  ].map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => setSelectedStatus(s.id)}
+                      className={`px-2.5 py-1 rounded-full transition cursor-pointer ${
+                        selectedStatus === s.id
+                          ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/40"
+                          : "hover:text-slate-200"
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Content Rating filter */}
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-[11px] font-medium text-slate-400 ml-1">Rating:</span>
+                <div className="flex items-center p-1 bg-white/[0.04] ring-1 ring-white/10 rounded-full font-semibold text-slate-400">
+                  {[
+                    { id: "ALL", label: "All" },
+                    { id: "SAFE", label: `Safe (${counts.safe})` },
+                    { id: "SUGGESTIVE_18", label: `Suggestive/18+ (${counts.suggestive})` },
+                  ].map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => setSelectedRating(r.id)}
+                      className={`px-2.5 py-1 rounded-full transition cursor-pointer ${
+                        selectedRating === r.id
+                          ? r.id === "SUGGESTIVE_18"
+                            ? "bg-rose-500/20 text-rose-200 ring-1 ring-rose-500/40"
+                            : "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40"
+                          : "hover:text-slate-200"
+                      }`}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Reset filters if any active */}
+            {(selectedType !== "ALL" || selectedStatus !== "ALL" || selectedRating !== "ALL" || search) && (
+              <button
+                onClick={() => {
+                  setSelectedType("ALL");
+                  setSelectedStatus("ALL");
+                  setSelectedRating("ALL");
+                  setSearch("");
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium px-2 py-1 rounded-md transition hover:bg-white/5 cursor-pointer ml-auto"
+              >
+                Reset Filters
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Catalog grid */}
@@ -406,13 +527,18 @@ export default function HomePage() {
         ) : filteredMedia.length === 0 ? (
           <div className="p-14 text-center rounded-2xl bg-white/[0.03] ring-1 ring-white/10">
             <p className="text-slate-300 text-sm font-medium mb-4">
-              No manga found matching &quot;{search}&quot;
+              No manga/manhwa found matching your filters
             </p>
             <button
-              onClick={() => setSearch("")}
+              onClick={() => {
+                setSearch("");
+                setSelectedType("ALL");
+                setSelectedRating("ALL");
+                setSelectedStatus("ALL");
+              }}
               className="px-5 py-2.5 rounded-full bg-indigo-500/15 text-[#a5b4fc] text-xs font-semibold ring-1 ring-indigo-500/40 hover:bg-indigo-500/25 transition cursor-pointer"
             >
-              Clear Search Filter
+              Reset All Filters
             </button>
           </div>
         ) : (
@@ -444,10 +570,25 @@ export default function HomePage() {
                     <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0b0f19]/80 to-transparent" />
 
                     {/* Badges */}
-                    <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
+                    <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1.5 max-w-[78%]">
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-[#0b0f19]/85 text-[#7dd3fc] ring-1 ring-white/10 backdrop-blur-md">
                         {m.type}
                       </span>
+                      {m.status === "RELEASING" ? (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide bg-[#0b0f19]/85 text-sky-400 ring-1 ring-sky-500/30 backdrop-blur-md flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+                          Releasing
+                        </span>
+                      ) : m.status === "FINISHED" ? (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-medium tracking-wide bg-[#0b0f19]/85 text-slate-300 ring-1 ring-white/10 backdrop-blur-md">
+                          Finished
+                        </span>
+                      ) : null}
+                      {m.contentRating === "SUGGESTIVE_18" && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wide bg-rose-950/90 text-rose-300 ring-1 ring-rose-500/40 backdrop-blur-md">
+                          18+
+                        </span>
+                      )}
                     </div>
                     {meta?.rating && (
                       <div className="absolute top-2.5 right-2.5">

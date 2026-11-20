@@ -26,6 +26,9 @@ export async function GET() {
       coverImage: true,
       chapterNumberingSource: true,
       countryOfOrigin: true,
+      status: true,
+      contentRating: true,
+      genres: true,
     },
     orderBy: { title: "asc" },
   });

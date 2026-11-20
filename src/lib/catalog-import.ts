@@ -121,6 +121,9 @@ async function runImport({
                     title: item.title,
                     coverImage: cover,
                     totalChapters: chapters,
+                    status: item.status,
+                    contentRating: item.contentRating,
+                    genres: item.genres,
                   },
                 });
                 result.updated += 1;
@@ -134,6 +137,9 @@ async function runImport({
                     totalChapters: chapters,
                     chapterNumberingSource: "anilist",
                     countryOfOrigin: country,
+                    status: item.status,
+                    contentRating: item.contentRating,
+                    genres: item.genres,
                   },
                 });
                 result.imported += 1;

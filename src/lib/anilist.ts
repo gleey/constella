@@ -21,6 +21,8 @@ interface AniListMedia {
   countryOfOrigin: string;
   format: string; // MANGA, MANHWA, etc.
   status?: string | null;
+  isAdult?: boolean | null;
+  genres?: string[] | null;
   description?: string | null;
   synonyms?: string[];
   characters?: {
@@ -45,7 +47,35 @@ export interface SearchResult {
   chapters: number | null;
   countryOfOrigin: string;
   format: string;
+  status: string;
+  contentRating: "SAFE" | "SUGGESTIVE_18";
+  genres: string[];
   synonyms: string[];
+}
+
+export function determineContentRating(
+  isAdult?: boolean | null,
+  genres?: string[] | null,
+): "SAFE" | "SUGGESTIVE_18" {
+  if (isAdult) return "SUGGESTIVE_18";
+  if (genres && genres.length > 0) {
+    const adultGenres = ["ecchi", "hentai", "erotica"];
+    if (genres.some((g) => adultGenres.includes(g.toLowerCase()))) {
+      return "SUGGESTIVE_18";
+    }
+  }
+  return "SAFE";
+}
+
+export function normalizeMediaStatus(
+  status?: string | null,
+): "RELEASING" | "FINISHED" | "CANCELLED" | "HIATUS" {
+  if (!status) return "RELEASING";
+  const upper = status.toUpperCase();
+  if (["RELEASING", "FINISHED", "CANCELLED", "HIATUS"].includes(upper)) {
+    return upper as "RELEASING" | "FINISHED" | "CANCELLED" | "HIATUS";
+  }
+  return "RELEASING";
 }
 
 export interface CharacterDetail {
@@ -71,6 +101,9 @@ query ($search: String, $page: Int, $perPage: Int) {
       chapters
       countryOfOrigin
       format
+      status
+      isAdult
+      genres
       synonyms
     }
   }
@@ -88,6 +121,8 @@ query ($page: Int, $perPage: Int, $countryOfOrigin: CountryCode, $sort: [MediaSo
       countryOfOrigin
       format
       status
+      isAdult
+      genres
       synonyms
     }
   }
@@ -104,6 +139,8 @@ query ($id: Int) {
     countryOfOrigin
     format
     status
+    isAdult
+    genres
     synonyms
     characters(sort: [ROLE, RELEVANCE], perPage: 40) {
       edges {
@@ -157,6 +194,9 @@ export async function searchMedia(search: string, limit = 10): Promise<SearchRes
     chapters: m.chapters,
     countryOfOrigin: m.countryOfOrigin,
     format: m.format,
+    status: normalizeMediaStatus(m.status),
+    contentRating: determineContentRating(m.isAdult, m.genres),
+    genres: m.genres || [],
     synonyms: m.synonyms || [],
   }));
 }
@@ -211,6 +251,9 @@ export async function fetchPopularMediaPage({
     chapters: m.chapters,
     countryOfOrigin: m.countryOfOrigin,
     format: m.format,
+    status: normalizeMediaStatus(m.status),
+    contentRating: determineContentRating(m.isAdult, m.genres),
+    genres: m.genres || [],
     synonyms: m.synonyms || [],
   }));
 
@@ -257,6 +300,9 @@ export async function fetchMediaDetail(anilistId: number): Promise<MediaDetail> 
     chapters: m.chapters,
     countryOfOrigin: m.countryOfOrigin,
     format: m.format,
+    status: normalizeMediaStatus(m.status),
+    contentRating: determineContentRating(m.isAdult, m.genres),
+    genres: m.genres || [],
     synonyms: m.synonyms || [],
     characters: edges.map((edge) => {
       const c = edge.node;

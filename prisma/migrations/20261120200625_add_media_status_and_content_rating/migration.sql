@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Media" ADD COLUMN     "contentRating" TEXT NOT NULL DEFAULT 'SAFE',
+ADD COLUMN     "genres" TEXT[] DEFAULT ARRAY[]::TEXT[],
+ADD COLUMN     "status" TEXT NOT NULL DEFAULT 'RELEASING';
