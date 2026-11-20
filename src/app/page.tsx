@@ -198,9 +198,9 @@ export default function HomePage() {
             alt="Hero Background"
             fill
             priority
-            className="object-cover object-center blur-md opacity-20 scale-105"
+            className="object-cover object-center blur-md opacity-45 scale-105"
           />
-          <div className="absolute inset-0 bg-[#0b0f19]/85" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#0b0f19]/80 via-[#0b0f19]/70 to-[#0b0f19]" />
         </div>
 
         {/* Carousel content */}

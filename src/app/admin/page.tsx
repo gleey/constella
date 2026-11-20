@@ -56,7 +56,7 @@ interface LiveRelationship {
 }
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<"catalog" | "ingest" | "review" | "live">("catalog");
+  const [activeTab, setActiveTab] = useState<"catalog" | "ingest" | "review" | "live" | "pages">("catalog");
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
   const [catalogSearchQuery, setCatalogSearchQuery] = useState("");
   const [selectedMediaId, setSelectedMediaId] = useState<string>("");
@@ -64,6 +64,13 @@ export default function AdminPage() {
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [bgStatus, setBgStatus] = useState<BackgroundSyncStatus | null>(null);
   const [deletingMediaId, setDeletingMediaId] = useState<string | null>(null);
+
+  // Editable site pages (About)
+  const [pageTitle, setPageTitle] = useState("");
+  const [pageContent, setPageContent] = useState("");
+  const [pageStatus, setPageStatus] = useState<string | null>(null);
+  const [loadingPage, setLoadingPage] = useState(false);
+  const [savingPage, setSavingPage] = useState(false);
 
   // Ingest state
   const [searchQuery, setSearchQuery] = useState("");
@@ -174,6 +181,43 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, [bgStatus?.isRunning]);
 
+  // Load editable page content when the Pages tab is opened
+  useEffect(() => {
+    if (activeTab !== "pages") return;
+    setLoadingPage(true);
+    setPageStatus(null);
+    fetch("/api/pages/about")
+      .then((r) => r.json())
+      .then((data) => {
+        setPageTitle(data.title ?? "About Constella");
+        setPageContent(data.content ?? "");
+      })
+      .catch(() => setPageStatus("Failed to load page content."))
+      .finally(() => setLoadingPage(false));
+  }, [activeTab]);
+
+  const handleSavePage = async () => {
+    setSavingPage(true);
+    setPageStatus(null);
+    try {
+      const res = await fetch("/api/pages/about", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: pageTitle, content: pageContent }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPageStatus("Saved. The About page is updated.");
+      } else {
+        setPageStatus(`Save failed: ${data.error}`);
+      }
+    } catch (err) {
+      setPageStatus(`Network error: ${err}`);
+    } finally {
+      setSavingPage(false);
+    }
+  };
+
   // Handle AI Lore Sync (Tier 2 — CONSUMES Gemini/Groq tokens)
   const handleStartLoreSync = async (anilistId?: number) => {
     const scope = anilistId ? "1 series ini" : "SEMUA series (±6 karakter/series)";
@@ -218,6 +262,32 @@ export default function AdminPage() {
         setBgStatus(data.status);
       } else {
         setSyncStatus(`Sync error: ${data.error}`);
+      }
+    } catch (err) {
+      setSyncStatus(`Network error: ${err}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Handle bulk catalog import (metadata only, no AI)
+  const handleCatalogImport = async () => {
+    setIsSyncing(true);
+    setSyncStatus("Importing catalog from AniList (metadata only)...");
+    try {
+      const res = await fetch("/api/admin/catalog-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ countries: ["KR", "JP"], maxPages: 6, perPage: 50 }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncStatus(
+          `Catalog import done — ${data.imported} new, ${data.updated} updated, ${data.skipped} skipped across ${data.pages} page(s).`,
+        );
+        await loadMedia();
+      } else {
+        setSyncStatus(`Import error: ${data.error}`);
       }
     } catch (err) {
       setSyncStatus(`Network error: ${err}`);
@@ -418,59 +488,82 @@ export default function AdminPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0f19] text-gray-200">
+    <div className="min-h-screen bg-[#0b0f19] text-slate-200 aurora">
       {/* Header bar */}
-      <header className="border-b border-[#1e293b] bg-[#111827]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <header className="border-b border-white/5 bg-[#0b0f19]/80 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-7">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="px-2.5 py-0.5 rounded text-xs font-semibold bg-[#818cf8]/15 text-[#818cf8] border border-[#818cf8]/30">
-                  ADMIN DASHBOARD
+              <div className="flex items-center gap-2.5 mb-2">
+                <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-[#a5b4fc] ring-1 ring-white/10">
+                  Admin Dashboard
                 </span>
-                <span className="text-xs text-gray-400">Spoiler-Free Temporal Map Engine</span>
+                <span className="text-xs text-slate-500">Constella control room</span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
                 Studio &amp; Content Management
               </h1>
             </div>
 
-            <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={handleCatalogImport}
+                disabled={isSyncing || bgStatus?.isRunning}
+                className="px-4 py-2 rounded-full bg-[#6366f1] hover:bg-[#818cf8] text-white text-xs sm:text-sm font-semibold transition-colors shadow-lg shadow-indigo-950/40 flex items-center gap-2 disabled:opacity-50"
+                title="Tarik katalog manhwa & manga dari AniList (metadata saja, tanpa AI)."
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 1 1-9-9" />
+                  <path d="M21 3v6h-6" />
+                </svg>
+                {isSyncing ? "Working..." : "Load Full Catalog"}
+              </button>
               <button
                 onClick={() => handleStartLoreSync()}
                 disabled={isSyncing || bgStatus?.isRunning}
-                className="px-3.5 py-2 bg-[#818cf8]/20 hover:bg-[#818cf8]/30 text-[#818cf8] border border-[#818cf8]/40 rounded-lg text-xs sm:text-sm font-semibold transition-colors flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-200 text-xs sm:text-sm font-semibold ring-1 ring-white/10 transition-colors flex items-center gap-2 disabled:opacity-50"
                 title="AI-powered: ekstrak lore dari Fandom wiki via Gemini/Groq. MEMAKAN token AI."
               >
                 {bgStatus?.isRunning ? (
                   <>
-                    <span className="w-2 h-2 rounded-full bg-[#34d399] animate-pulse" />
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                     <span>Syncing ({bgStatus.progress}%)</span>
                   </>
                 ) : (
                   <>
-                    <span>🤖 AI Lore Sync (pakai token AI)</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 3v3M12 18v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M3 12h3M18 12h3M4.9 19.1 7 17M17 7l2.1-2.1" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                    AI Lore Sync
                   </>
                 )}
               </button>
               <button
                 onClick={handleStartCatalogSync}
                 disabled={isSyncing || bgStatus?.isRunning}
-                className="px-3.5 py-2 bg-[#34d399]/15 hover:bg-[#34d399]/25 text-[#34d399] border border-[#34d399]/30 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-2 rounded-full bg-emerald-400/10 hover:bg-emerald-400/20 text-emerald-300 text-xs sm:text-sm font-medium ring-1 ring-emerald-400/25 transition-colors flex items-center gap-2 disabled:opacity-50"
                 title="Tanpa AI: sync cover, karakter & gambar dari AniList + Fandom saja."
               >
-                📚 Catalog Sync (gratis)
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+                </svg>
+                Catalog Sync
               </button>
               <button
                 onClick={handleFastSeedSync}
                 disabled={isSyncing}
-                className="px-3.5 py-2 bg-[#38bdf8]/15 hover:bg-[#38bdf8]/25 text-[#38bdf8] border border-[#38bdf8]/30 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-200 text-xs sm:text-sm font-medium ring-1 ring-white/10 transition-colors flex items-center gap-2 disabled:opacity-50"
               >
-                ⚡ Fast Seed Sync
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z" />
+                </svg>
+                Fast Seed
               </button>
               <Link
                 href="/"
-                className="px-3.5 py-2 bg-[#1e293b] hover:bg-[#334155] text-gray-200 rounded-lg text-xs sm:text-sm font-medium transition-colors"
+                className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 text-xs sm:text-sm font-medium ring-1 ring-white/10 transition-colors"
               >
                 Back to Site
               </Link>
@@ -478,46 +571,46 @@ export default function AdminPage() {
           </div>
 
           {syncStatus && (
-            <div className="mt-4 p-3 rounded-lg bg-[#1a2333] border border-[#38bdf8]/30 text-xs text-[#38bdf8]">
+            <div className="mt-5 rounded-xl bg-[#818cf8]/10 px-4 py-3 text-xs text-[#c7d2fe] ring-1 ring-[#818cf8]/25">
               {syncStatus}
             </div>
           )}
 
           {/* Active Background Sync Monitor */}
           {bgStatus && (bgStatus.isRunning || bgStatus.logs.length > 0) && (
-            <div className="mt-5 p-4 rounded-xl bg-[#0e1526] border border-[#1e293b]">
+            <div className="mt-5 p-4 rounded-2xl bg-white/[0.03] ring-1 ring-white/10">
               <div className="flex items-center justify-between gap-4 mb-3">
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <span
                     className={`w-2.5 h-2.5 rounded-full ${
-                      bgStatus.isRunning ? "bg-[#34d399] animate-ping" : "bg-[#818cf8]"
+                      bgStatus.isRunning ? "bg-emerald-400 animate-ping" : "bg-[#818cf8]"
                     }`}
                   />
                   <span className="text-xs font-bold uppercase tracking-wider text-white">
                     {bgStatus.isRunning
                       ? bgStatus.syncMode === "lore"
-                        ? "🤖 AI Lore Sync Active (pakai token AI)"
-                        : "📚 Catalog Sync Active (tanpa AI)"
+                        ? "AI Lore Sync Active (consumes AI tokens)"
+                        : "Catalog Sync Active (no AI)"
                       : "Last Sync Results"}
                   </span>
                   {bgStatus.currentSeries && (
-                    <span className="text-xs text-[#38bdf8] px-2 py-0.5 rounded bg-[#38bdf8]/10 border border-[#38bdf8]/20">
+                    <span className="text-xs text-[#7dd3fc] px-2 py-0.5 rounded-full bg-[#38bdf8]/10 ring-1 ring-[#38bdf8]/20">
                       Series: {bgStatus.currentSeries}
                     </span>
                   )}
                   {bgStatus.currentCharacter && (
-                    <span className="text-xs text-[#a78bfa] px-2 py-0.5 rounded bg-[#a78bfa]/10 border border-[#a78bfa]/20">
+                    <span className="text-xs text-[#c4b5fd] px-2 py-0.5 rounded-full bg-[#a78bfa]/10 ring-1 ring-[#a78bfa]/20">
                       Character: {bgStatus.currentCharacter}
                     </span>
                   )}
                 </div>
-                <span className="text-xs font-mono text-gray-400 font-semibold">
+                <span className="text-xs font-mono text-slate-400 font-semibold">
                   {bgStatus.completedSeries} / {bgStatus.totalSeries} Series ({bgStatus.progress}%)
                 </span>
               </div>
 
               {/* Progress bar */}
-              <div className="w-full bg-[#1e293b] rounded-full h-2 overflow-hidden mb-3">
+              <div className="w-full bg-white/[0.06] rounded-full h-2 overflow-hidden mb-3">
                 <div
                   className="bg-[#818cf8] h-2 rounded-full transition-all duration-300"
                   style={{ width: `${bgStatus.progress}%` }}
@@ -525,7 +618,7 @@ export default function AdminPage() {
               </div>
 
               {/* Live Terminal Log Viewer */}
-              <div className="bg-[#070a12] border border-[#1e293b] rounded-lg p-3 max-h-36 overflow-y-auto font-mono text-[11px] text-gray-400 space-y-1">
+              <div className="bg-black/40 rounded-xl p-3 max-h-36 overflow-y-auto font-mono text-[11px] text-slate-400 space-y-1 ring-1 ring-white/5">
                 {bgStatus.logs.length === 0 ? (
                   <div>Waiting for logs...</div>
                 ) : (
@@ -540,46 +633,81 @@ export default function AdminPage() {
           )}
 
           {/* Tab navigation */}
-          <div className="flex gap-2 mt-6 border-b border-[#1e293b] -mb-px">
+          <div className="mt-6 flex flex-wrap gap-2">
             <button
               onClick={() => setActiveTab("catalog")}
-              className={`pb-3 px-4 text-sm font-medium border-b-2 transition-colors ${
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === "catalog"
-                  ? "border-[#818cf8] text-[#818cf8]"
-                  : "border-transparent text-gray-400 hover:text-gray-200"
+                  ? "bg-white/[0.08] text-[#a5b4fc] ring-1 ring-white/10"
+                  : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
               }`}
             >
-              📚 Manga Catalog ({mediaList.length})
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+              Manga Catalog ({mediaList.length})
             </button>
             <button
               onClick={() => setActiveTab("ingest")}
-              className={`pb-3 px-4 text-sm font-medium border-b-2 transition-colors ${
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === "ingest"
-                  ? "border-[#818cf8] text-[#818cf8]"
-                  : "border-transparent text-gray-400 hover:text-gray-200"
+                  ? "bg-white/[0.08] text-[#a5b4fc] ring-1 ring-white/10"
+                  : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
               }`}
             >
-              🚀 Ingest AniList &amp; Fandom
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v12" />
+                <path d="m7 10 5 5 5-5" />
+                <path d="M5 21h14" />
+              </svg>
+              Ingest AniList &amp; Fandom
             </button>
             <button
               onClick={() => setActiveTab("live")}
-              className={`pb-3 px-4 text-sm font-medium border-b-2 transition-colors ${
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === "live"
-                  ? "border-[#818cf8] text-[#818cf8]"
-                  : "border-transparent text-gray-400 hover:text-gray-200"
+                  ? "bg-white/[0.08] text-[#a5b4fc] ring-1 ring-white/10"
+                  : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
               }`}
             >
-              🕸️ Live Relations Editor
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="5" cy="6" r="2.2" />
+                <circle cx="19" cy="6" r="2.2" />
+                <circle cx="12" cy="18" r="2.2" />
+                <path d="M7.2 6h9.6M6.4 8.1l4.4 7.8M17.6 8.1l-4.4 7.8" />
+              </svg>
+              Live Relations Editor
             </button>
             <button
               onClick={() => setActiveTab("review")}
-              className={`pb-3 px-4 text-sm font-medium border-b-2 transition-colors ${
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === "review"
-                  ? "border-[#818cf8] text-[#818cf8]"
-                  : "border-transparent text-gray-400 hover:text-gray-200"
+                  ? "bg-white/[0.08] text-[#a5b4fc] ring-1 ring-white/10"
+                  : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
               }`}
             >
-              📝 Draft Reviews
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="8" y="2" width="8" height="4" rx="1" />
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                <path d="m9 14 2 2 4-4" />
+              </svg>
+              Draft Reviews
+            </button>
+            <button
+              onClick={() => setActiveTab("pages")}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                activeTab === "pages"
+                  ? "bg-white/[0.08] text-[#a5b4fc] ring-1 ring-white/10"
+                  : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+              }`}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+                <path d="M8 13h8M8 17h5" />
+              </svg>
+              Site Pages
             </button>
           </div>
         </div>
@@ -589,13 +717,13 @@ export default function AdminPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         {/* Media Series Selector (for live editor and review tabs) */}
         {(activeTab === "live" || activeTab === "review") && (
-          <div className="mb-6 p-4 rounded-xl bg-[#131b2e] border border-[#1e293b] flex items-center justify-between flex-wrap gap-4">
+          <div className="mb-6 p-4 rounded-2xl bg-white/[0.03] ring-1 ring-white/10 flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-3">
-              <label className="text-sm font-semibold text-gray-300">Active Media Series:</label>
+              <label className="text-sm font-semibold text-slate-300">Active Media Series:</label>
               <select
                 value={selectedMediaId}
                 onChange={(e) => setSelectedMediaId(e.target.value)}
-                className="bg-[#0b0f19] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#818cf8]"
+                className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-[#818cf8]"
               >
                 {mediaList.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -608,9 +736,12 @@ export default function AdminPage() {
             {selectedMediaId && (
               <Link
                 href={`/media/${selectedMediaId}`}
-                className="text-xs text-[#38bdf8] hover:underline flex items-center gap-1"
+                className="text-xs text-[#7dd3fc] hover:text-[#7dd3fc] transition-colors inline-flex items-center gap-1"
               >
-                Open Live Graph Page ↗
+                Open Live Graph Page
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 17 17 7M9 7h8v8" />
+                </svg>
               </Link>
             )}
           </div>
@@ -619,31 +750,33 @@ export default function AdminPage() {
 {/* TAB 1: CATALOG OVERVIEW */}
         {activeTab === "catalog" && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
-                <h2 className="text-lg font-bold text-white">Active Manga & Manhwa Series</h2>
-                <p className="text-xs text-gray-400">
+                <h2 className="text-lg font-bold text-white">Active Manga &amp; Manhwa Series</h2>
+                <p className="text-xs text-slate-400">
                   Series loaded into the database with temporal character graphs.
                 </p>
               </div>
               <button
                 onClick={handleFastSeedSync}
                 disabled={isSyncing}
-                className="px-3 py-1.5 bg-[#818cf8]/15 hover:bg-[#818cf8]/25 text-[#818cf8] border border-[#818cf8]/30 rounded text-xs font-semibold transition-colors"
+                className="rounded-full bg-white/5 hover:bg-white/10 px-4 py-2 text-xs font-semibold text-slate-200 ring-1 ring-white/10 transition-colors disabled:opacity-50"
               >
                 Refresh / Re-sync
               </button>
             </div>
 
             {/* Search/Filter Bar */}
-            <div className="p-4 rounded-xl bg-[#131b2e] border border-[#1e293b]">
-              <label className="block text-xs font-semibold text-gray-300 mb-2">Search Series</label>
+            <div className="p-4 rounded-2xl bg-white/[0.03] ring-1 ring-white/10">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                Search Series
+              </label>
               <input
                 type="text"
                 value={catalogSearchQuery}
                 onChange={(e) => setCatalogSearchQuery(e.target.value)}
                 placeholder="Filter by title..."
-                className="w-full bg-[#0b0f19] border border-[#1e293b] rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-[#818cf8]"
+                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-[#818cf8]"
               />
             </div>
 
@@ -655,25 +788,25 @@ export default function AdminPage() {
                 .map((m) => (
                 <div
                   key={m.id}
-                  className="p-4 rounded-xl bg-[#131b2e] border border-[#1e293b] flex gap-4 items-center"
+                  className="p-4 rounded-2xl bg-white/[0.03] ring-1 ring-white/10 hover:ring-[#6366f1]/50 transition-colors flex gap-4 items-center"
                 >
                   <img
                     src={m.coverImage}
                     alt={m.title}
-                    className="w-16 h-24 object-cover rounded-lg bg-[#0b0f19] shrink-0 border border-[#1e293b]"
+                    className="w-16 h-24 object-cover rounded-xl bg-black/30 shrink-0 ring-1 ring-white/10"
                   />
                   <div className="flex-1 min-w-0">
                     <h3 className="font-bold text-white text-base truncate">{m.title}</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Chapters: <span className="text-gray-200 font-semibold">{m.totalChapters}</span>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Chapters: <span className="text-slate-200 font-semibold">{m.totalChapters}</span>
                     </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Source: <span className="text-[#38bdf8]">{m.chapterNumberingSource || "official_en"}</span>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Source: <span className="text-[#7dd3fc]">{m.chapterNumberingSource || "official_en"}</span>
                     </p>
                     <div className="mt-3 flex items-center gap-2 flex-wrap">
                       <Link
                         href={`/media/${m.id}`}
-                        className="px-2.5 py-1 rounded bg-[#38bdf8]/15 text-[#38bdf8] border border-[#38bdf8]/30 text-xs font-medium hover:bg-[#38bdf8]/25 transition-colors"
+                        className="px-2.5 py-1 rounded-full bg-[#38bdf8]/10 text-[#7dd3fc] ring-1 ring-[#38bdf8]/25 text-xs font-medium hover:bg-[#38bdf8]/20 transition-colors"
                       >
                         View Graph
                       </Link>
@@ -682,7 +815,7 @@ export default function AdminPage() {
                           setSelectedMediaId(m.id);
                           setActiveTab("live");
                         }}
-                        className="px-2.5 py-1 rounded bg-[#1e293b] text-gray-300 text-xs hover:bg-[#334155] transition-colors"
+                        className="px-2.5 py-1 rounded-full bg-white/5 text-slate-300 ring-1 ring-white/10 text-xs hover:bg-white/10 transition-colors"
                       >
                         Edit Relations
                       </button>
@@ -690,17 +823,17 @@ export default function AdminPage() {
                         <button
                           onClick={() => handleStartLoreSync(m.anilistId)}
                           disabled={bgStatus?.isRunning}
-                          className="px-2.5 py-1 rounded bg-[#818cf8]/15 text-[#818cf8] border border-[#818cf8]/30 text-xs font-medium hover:bg-[#818cf8]/25 transition-colors disabled:opacity-50"
+                          className="px-2.5 py-1 rounded-full bg-[#818cf8]/10 text-[#a5b4fc] ring-1 ring-[#818cf8]/25 text-xs font-medium hover:bg-[#818cf8]/20 transition-colors disabled:opacity-50"
                         >
-                          ⚡ AI Lore Sync
+                          AI Lore Sync
                         </button>
                       )}
                       <button
                         onClick={() => handleDeleteMedia(m.id, m.title)}
                         disabled={deletingMediaId === m.id}
-                        className="px-2.5 py-1 rounded bg-[#f87171]/15 text-[#f87171] border border-[#f87171]/30 text-xs font-medium hover:bg-[#f87171]/25 transition-colors disabled:opacity-50"
+                        className="px-2.5 py-1 rounded-full bg-rose-400/10 text-[#fda4af] ring-1 ring-rose-400/25 text-xs font-medium hover:bg-rose-400/20 transition-colors disabled:opacity-50"
                       >
-                        {deletingMediaId === m.id ? "Deleting..." : "🗑 Delete"}
+                        {deletingMediaId === m.id ? "Deleting..." : "Delete"}
                       </button>
                     </div>
                   </div>
@@ -716,7 +849,7 @@ export default function AdminPage() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-lg font-bold text-white">Search &amp; Import from AniList</h2>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-slate-400">
                   Search manga/manhwa by title. Filters strictly to English and Raw translations.
                 </p>
               </div>
@@ -728,13 +861,13 @@ export default function AdminPage() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Type title (e.g. Solo Leveling, Omniscient Reader)..."
-                  className="w-full bg-[#131b2e] border border-[#1e293b] rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-[#818cf8]"
+                  className="w-full bg-white/[0.03] ring-1 ring-white/10 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-[#818cf8]"
                 />
               </div>
 
               {/* Search results dropdown */}
               {isSearching ? (
-                <div className="p-4 text-center text-xs text-gray-400">Searching AniList...</div>
+                <div className="p-4 text-center text-xs text-slate-400">Searching AniList...</div>
               ) : searchResults.length > 0 ? (
                 <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                   {searchResults.map((res) => (
@@ -748,7 +881,7 @@ export default function AdminPage() {
                       className={`p-3 rounded-lg border flex gap-3 items-center cursor-pointer transition-colors ${
                         selectedMedia?.id === res.id
                           ? "bg-[#818cf8]/10 border-[#818cf8]"
-                          : "bg-[#131b2e] border-[#1e293b] hover:bg-[#1a233a]"
+                          : "bg-white/[0.03] border-white/10 hover:bg-[#1a233a]"
                       }`}
                     >
                       <img
@@ -758,7 +891,7 @@ export default function AdminPage() {
                       />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-semibold text-white truncate">{res.title}</div>
-                        <div className="text-xs text-gray-400 mt-0.5">
+                        <div className="text-xs text-slate-400 mt-0.5">
                           {res.format} • {res.countryOfOrigin} • {res.chapters ? `${res.chapters} ch` : "Ongoing"}
                         </div>
                       </div>
@@ -769,16 +902,16 @@ export default function AdminPage() {
                   ))}
                 </div>
               ) : searchQuery.length >= 2 ? (
-                <div className="p-4 text-center text-xs text-gray-500">No matching series found</div>
+                <div className="p-4 text-center text-xs text-slate-500">No matching series found</div>
               ) : null}
             </div>
 
             {/* Ingestion Parameters */}
-            <div className="p-6 rounded-xl bg-[#131b2e] border border-[#1e293b] space-y-5">
+            <div className="p-6 rounded-xl bg-white/[0.03] ring-1 ring-white/10 space-y-5">
               <h3 className="font-bold text-white text-base">Ingestion Settings</h3>
 
               {selectedMedia ? (
-                <div className="p-3 rounded-lg bg-[#0b0f19] border border-[#1e293b] flex gap-3 items-center">
+                <div className="p-3 rounded-lg bg-[#0b0f19] ring-1 ring-white/10 flex gap-3 items-center">
                   <img
                     src={selectedMedia.coverImage}
                     alt={selectedMedia.title}
@@ -786,17 +919,17 @@ export default function AdminPage() {
                   />
                   <div>
                     <div className="font-bold text-white text-sm">{selectedMedia.title}</div>
-                    <div className="text-xs text-gray-400">AniList ID: {selectedMedia.id}</div>
+                    <div className="text-xs text-slate-400">AniList ID: {selectedMedia.id}</div>
                   </div>
                 </div>
               ) : (
-                <div className="p-4 rounded-lg bg-[#0b0f19] border border-[#1e293b] text-xs text-gray-500 text-center">
+                <div className="p-4 rounded-lg bg-[#0b0f19] ring-1 ring-white/10 text-xs text-slate-500 text-center">
                   Select a manga/manhwa from the left panel to configure ingestion
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-gray-300 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Fandom Wiki Subdomain
                 </label>
                 <input
@@ -804,21 +937,21 @@ export default function AdminPage() {
                   value={wikiSubdomain}
                   onChange={(e) => setWikiSubdomain(e.target.value)}
                   placeholder="e.g. solo-leveling"
-                  className="w-full bg-[#0b0f19] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#818cf8]"
+                  className="w-full bg-[#0b0f19] ring-1 ring-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#818cf8]"
                 />
-                <span className="text-[11px] text-gray-500 mt-1 block">
+                <span className="text-[11px] text-slate-500 mt-1 block">
                   Scrapes character pages from https://&#123;subdomain&#125;.fandom.com
                 </span>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-300 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Chapter Numbering Baseline
                 </label>
                 <select
                   value={chapterNumberingSource}
                   onChange={(e) => setChapterNumberingSource(e.target.value as any)}
-                  className="w-full bg-[#0b0f19] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#818cf8]"
+                  className="w-full bg-[#0b0f19] ring-1 ring-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#818cf8]"
                 >
                   <option value="official_en">Official English Translation (Webtoon/Tapas)</option>
                   <option value="raw_kr">Raw Korean (Kakao/Naver)</option>
@@ -827,7 +960,7 @@ export default function AdminPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-300 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Total Chapters
                 </label>
                 <input
@@ -835,7 +968,7 @@ export default function AdminPage() {
                   value={totalChapters}
                   onChange={(e) => setTotalChapters(Number(e.target.value))}
                   min={1}
-                  className="w-full bg-[#0b0f19] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#818cf8]"
+                  className="w-full bg-[#0b0f19] ring-1 ring-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#818cf8]"
                 />
               </div>
 
@@ -845,9 +978,9 @@ export default function AdminPage() {
                   id="autoPublish"
                   checked={autoPublish}
                   onChange={(e) => setAutoPublish(e.target.checked)}
-                  className="rounded border-[#1e293b] bg-[#0b0f19] text-[#818cf8] focus:ring-0"
+                  className="rounded border-white/10 bg-[#0b0f19] text-[#818cf8] focus:ring-0"
                 />
-                <label htmlFor="autoPublish" className="text-xs text-gray-300 cursor-pointer">
+                <label htmlFor="autoPublish" className="text-xs text-slate-300 cursor-pointer">
                   Direct Publish (parse with Gemini &amp; immediately promote clean data to graph)
                 </label>
               </div>
@@ -862,9 +995,9 @@ export default function AdminPage() {
 
               {/* Logs */}
               {ingestLogs.length > 0 && (
-                <div className="p-3 rounded-lg bg-[#0b0f19] border border-[#1e293b] space-y-1 text-xs font-mono max-h-48 overflow-y-auto">
+                <div className="p-3 rounded-lg bg-[#0b0f19] ring-1 ring-white/10 space-y-1 text-xs font-mono max-h-48 overflow-y-auto">
                   {ingestLogs.map((log, i) => (
-                    <div key={i} className="text-gray-300">
+                    <div key={i} className="text-slate-300">
                       {log}
                     </div>
                   ))}
@@ -878,16 +1011,16 @@ export default function AdminPage() {
         {activeTab === "live" && (
           <div className="space-y-8">
             {/* Create New Relationship Form */}
-            <div className="p-6 rounded-xl bg-[#131b2e] border border-[#1e293b]">
+            <div className="p-6 rounded-xl bg-white/[0.03] ring-1 ring-white/10">
               <h3 className="font-bold text-white text-base mb-4">Add New Relationship</h3>
               <form onSubmit={handleCreateRel} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Source Character</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Source Character</label>
                   <select
                     value={newRelForm.sourceCharacterId}
                     onChange={(e) => setNewRelForm({ ...newRelForm, sourceCharacterId: e.target.value })}
                     required
-                    className="w-full bg-[#0b0f19] border border-[#1e293b] rounded-lg px-3 py-2 text-xs text-gray-200"
+                    className="w-full bg-[#0b0f19] ring-1 ring-white/10 rounded-lg px-3 py-2 text-xs text-gray-200"
                   >
                     <option value="">Select source...</option>
                     {characters.map((c) => (
@@ -899,12 +1032,12 @@ export default function AdminPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Target Character</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Target Character</label>
                   <select
                     value={newRelForm.targetCharacterId}
                     onChange={(e) => setNewRelForm({ ...newRelForm, targetCharacterId: e.target.value })}
                     required
-                    className="w-full bg-[#0b0f19] border border-[#1e293b] rounded-lg px-3 py-2 text-xs text-gray-200"
+                    className="w-full bg-[#0b0f19] ring-1 ring-white/10 rounded-lg px-3 py-2 text-xs text-gray-200"
                   >
                     <option value="">Select target...</option>
                     {characters.map((c) => (
@@ -916,31 +1049,31 @@ export default function AdminPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Relation Type</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Relation Type</label>
                   <input
                     type="text"
                     value={newRelForm.relationType}
                     onChange={(e) => setNewRelForm({ ...newRelForm, relationType: e.target.value })}
                     required
                     placeholder="e.g. Ally, Enemy, Mentor"
-                    className="w-full bg-[#0b0f19] border border-[#1e293b] rounded-lg px-3 py-2 text-xs text-gray-200"
+                    className="w-full bg-[#0b0f19] ring-1 ring-white/10 rounded-lg px-3 py-2 text-xs text-gray-200"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Valid From (Ch.)</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Valid From (Ch.)</label>
                   <input
                     type="number"
                     value={newRelForm.validFrom}
                     onChange={(e) => setNewRelForm({ ...newRelForm, validFrom: Number(e.target.value) })}
                     min={1}
                     required
-                    className="w-full bg-[#0b0f19] border border-[#1e293b] rounded-lg px-3 py-2 text-xs text-gray-200"
+                    className="w-full bg-[#0b0f19] ring-1 ring-white/10 rounded-lg px-3 py-2 text-xs text-gray-200"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Valid Until (Ch. / null)</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Valid Until (Ch. / null)</label>
                   <input
                     type="number"
                     value={newRelForm.validUntil ?? ""}
@@ -951,7 +1084,7 @@ export default function AdminPage() {
                       })
                     }
                     placeholder="Ongoing (null)"
-                    className="w-full bg-[#0b0f19] border border-[#1e293b] rounded-lg px-3 py-2 text-xs text-gray-200"
+                    className="w-full bg-[#0b0f19] ring-1 ring-white/10 rounded-lg px-3 py-2 text-xs text-gray-200"
                   />
                 </div>
 
@@ -967,21 +1100,21 @@ export default function AdminPage() {
             </div>
 
             {/* Existing Relationships Table */}
-            <div className="rounded-xl bg-[#131b2e] border border-[#1e293b] overflow-hidden">
-              <div className="p-4 border-b border-[#1e293b] flex items-center justify-between">
+            <div className="rounded-xl bg-white/[0.03] ring-1 ring-white/10 overflow-hidden">
+              <div className="p-4 border-b border-white/10 flex items-center justify-between">
                 <h3 className="font-bold text-white text-sm">
                   Active Relationships ({relationships.length})
                 </h3>
               </div>
 
               {loadingRelationships ? (
-                <div className="p-8 text-center text-xs text-gray-400">Loading relationships...</div>
+                <div className="p-8 text-center text-xs text-slate-400">Loading relationships...</div>
               ) : relationships.length === 0 ? (
-                <div className="p-8 text-center text-xs text-gray-500">No relationships found for this series.</div>
+                <div className="p-8 text-center text-xs text-slate-500">No relationships found for this series.</div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs text-gray-300">
-                    <thead className="bg-[#0b0f19] text-gray-400 uppercase tracking-wider text-[10px]">
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="bg-[#0b0f19] text-slate-400 uppercase tracking-wider text-[10px]">
                       <tr>
                         <th className="p-3">Source Character</th>
                         <th className="p-3">Target Character</th>
@@ -1022,7 +1155,7 @@ export default function AdminPage() {
                                   type="text"
                                   value={relEditForm.relationType}
                                   onChange={(e) => setRelEditForm({ ...relEditForm, relationType: e.target.value })}
-                                  className="bg-[#0b0f19] border border-[#1e293b] rounded px-2 py-1 text-xs text-white"
+                                  className="bg-[#0b0f19] ring-1 ring-white/10 rounded px-2 py-1 text-xs text-white"
                                 />
                               ) : (
                                 <span className="px-2 py-0.5 rounded bg-[#818cf8]/15 text-[#818cf8] border border-[#818cf8]/20 font-medium">
@@ -1037,7 +1170,7 @@ export default function AdminPage() {
                                   type="number"
                                   value={relEditForm.validFrom}
                                   onChange={(e) => setRelEditForm({ ...relEditForm, validFrom: Number(e.target.value) })}
-                                  className="w-16 bg-[#0b0f19] border border-[#1e293b] rounded px-2 py-1 text-xs text-white"
+                                  className="w-16 bg-[#0b0f19] ring-1 ring-white/10 rounded px-2 py-1 text-xs text-white"
                                 />
                               ) : (
                                 `Ch. ${r.validFrom}`
@@ -1056,12 +1189,12 @@ export default function AdminPage() {
                                     })
                                   }
                                   placeholder="null"
-                                  className="w-16 bg-[#0b0f19] border border-[#1e293b] rounded px-2 py-1 text-xs text-white"
+                                  className="w-16 bg-[#0b0f19] ring-1 ring-white/10 rounded px-2 py-1 text-xs text-white"
                                 />
                               ) : r.validUntil ? (
                                 `Ch. ${r.validUntil}`
                               ) : (
-                                <span className="text-gray-500">Ongoing</span>
+                                <span className="text-slate-500">Ongoing</span>
                               )}
                             </td>
 
@@ -1071,12 +1204,12 @@ export default function AdminPage() {
                                   type="checkbox"
                                   checked={relEditForm.isSensitive}
                                   onChange={(e) => setRelEditForm({ ...relEditForm, isSensitive: e.target.checked })}
-                                  className="rounded border-[#1e293b] bg-[#0b0f19] text-[#818cf8]"
+                                  className="rounded border-white/10 bg-[#0b0f19] text-[#818cf8]"
                                 />
                               ) : r.isSensitive ? (
-                                <span className="text-[#fcd34d] font-semibold">Yes (Spoiler)</span>
+                                <span className="text-amber-300 font-semibold">Yes (Spoiler)</span>
                               ) : (
-                                <span className="text-gray-400">No</span>
+                                <span className="text-slate-400">No</span>
                               )}
                             </td>
 
@@ -1085,13 +1218,13 @@ export default function AdminPage() {
                                 <div className="flex items-center justify-end gap-2">
                                   <button
                                     onClick={() => handleSaveRelEdit(r.id)}
-                                    className="px-2 py-1 bg-[#34d399]/20 text-[#34d399] rounded text-[11px] font-semibold hover:bg-[#34d399]/30"
+                                    className="px-2 py-1 bg-[#34d399]/20 text-emerald-300 rounded text-[11px] font-semibold hover:bg-[#34d399]/30"
                                   >
                                     Save
                                   </button>
                                   <button
                                     onClick={() => setEditingRelId(null)}
-                                    className="px-2 py-1 bg-[#1e293b] text-gray-400 rounded text-[11px] hover:text-white"
+                                    className="px-2 py-1 bg-white/10 text-slate-400 rounded text-[11px] hover:text-white"
                                   >
                                     Cancel
                                   </button>
@@ -1108,13 +1241,13 @@ export default function AdminPage() {
                                         isSensitive: r.isSensitive,
                                       });
                                     }}
-                                    className="px-2 py-1 bg-[#1e293b] text-gray-300 rounded text-[11px] hover:bg-[#334155]"
+                                    className="px-2 py-1 bg-white/10 text-slate-300 rounded text-[11px] hover:bg-[#334155]"
                                   >
                                     Edit
                                   </button>
                                   <button
                                     onClick={() => handleDeleteRel(r.id)}
-                                    className="px-2 py-1 bg-[#f87171]/15 text-[#f87171] rounded text-[11px] hover:bg-[#f87171]/25"
+                                    className="px-2 py-1 bg-[#f87171]/15 text-[#fda4af] rounded text-[11px] hover:bg-[#f87171]/25"
                                   >
                                     Delete
                                   </button>
@@ -1137,33 +1270,33 @@ export default function AdminPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-lg font-bold text-white">Draft Reviews &amp; Name Resolution</h2>
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-slate-400">
                 Manage ingestion drafts generated by Gemini before promoting them to active tables.
               </p>
             </div>
 
             {loadingDrafts ? (
-              <div className="p-8 text-center text-xs text-gray-400">Loading drafts...</div>
+              <div className="p-8 text-center text-xs text-slate-400">Loading drafts...</div>
             ) : drafts.length === 0 ? (
-              <div className="p-8 text-center text-xs text-gray-500">No pending drafts found for this media.</div>
+              <div className="p-8 text-center text-xs text-slate-500">No pending drafts found for this media.</div>
             ) : (
               <div className="space-y-3">
                 {drafts.map((d) => (
                   <div
                     key={d.id}
-                    className="p-4 rounded-xl bg-[#131b2e] border border-[#1e293b] flex items-center justify-between"
+                    className="p-4 rounded-xl bg-white/[0.03] ring-1 ring-white/10 flex items-center justify-between"
                   >
                     <div>
                       <div className="font-bold text-white text-sm">{d.characterName}</div>
-                      <div className="text-xs text-gray-400 mt-0.5">
+                      <div className="text-xs text-slate-400 mt-0.5">
                         Status:{" "}
                         <span
                           className={`font-semibold ${
                             d.status === "APPROVED"
-                              ? "text-[#34d399]"
+                              ? "text-emerald-300"
                               : d.status === "UNRESOLVED"
-                              ? "text-[#fcd34d]"
-                              : "text-[#38bdf8]"
+                              ? "text-amber-300"
+                              : "text-[#7dd3fc]"
                           }`}
                         >
                           {d.status}
@@ -1182,6 +1315,81 @@ export default function AdminPage() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === "pages" && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-lg font-bold text-white">Site Pages</h2>
+              <p className="text-xs text-slate-400">
+                Edit static pages that are rendered on the public site. Changes go live as soon as
+                you save.
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-white/[0.03] p-5 ring-1 ring-white/10 space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">About page</h3>
+                  <p className="text-xs text-slate-500">Shown at /about</p>
+                </div>
+                {pageStatus && (
+                  <span
+                    className={`text-xs rounded-full px-3 py-1 ring-1 ${
+                      pageStatus.startsWith("Saved")
+                        ? "text-emerald-300 bg-emerald-400/10 ring-emerald-400/25"
+                        : "text-[#fda4af] bg-rose-400/10 ring-rose-400/25"
+                    }`}
+                  >
+                    {pageStatus}
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Page title
+                </label>
+                <input
+                  value={pageTitle}
+                  onChange={(e) => setPageTitle(e.target.value)}
+                  disabled={loadingPage}
+                  className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-[#818cf8] disabled:opacity-50"
+                  placeholder="About Constella"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Content
+                </label>
+                <textarea
+                  value={pageContent}
+                  onChange={(e) => setPageContent(e.target.value)}
+                  rows={16}
+                  disabled={loadingPage}
+                  className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm leading-relaxed text-slate-100 focus:outline-none focus:border-[#818cf8] disabled:opacity-50 resize-y"
+                  placeholder="Write the page content here..."
+                />
+                <p className="text-[11px] text-slate-500">
+                  Blank lines separate paragraphs. Plain text only.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleSavePage}
+                  disabled={savingPage || loadingPage}
+                  className="rounded-full bg-[#6366f1] hover:bg-[#818cf8] disabled:opacity-50 disabled:hover:bg-[#6366f1] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-950/40 transition-colors"
+                >
+                  {savingPage ? "Saving..." : "Save page"}
+                </button>
+                <span className="text-xs text-slate-500">
+                  {loadingPage ? "Loading current content..." : "Public About page updates on save."}
+                </span>
+              </div>
+            </div>
           </div>
         )}
       </main>

@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { syncPopularMedia } from "@/lib/auto-sync";
+import { importCatalog } from "@/lib/catalog-import";
 
-/** GET /api/media — list all media (with auto-sync if catalog has <= 2 titles). */
+/** GET /api/media — list all media, bulk-importing AniList catalog when sparse. */
 export async function GET() {
-  let count = await prisma.media.count();
-  if (count <= 2) {
+  const count = await prisma.media.count();
+  if (count < 200) {
     try {
-      await syncPopularMedia();
+      const result = await importCatalog({ maxPages: 4, perPage: 50 });
+      console.log(
+        `Catalog import: ${result.imported} new, ${result.updated} updated, ${result.skipped} skipped`,
+      );
     } catch (err) {
-      console.error("Auto-sync error:", err);
+      console.error("Catalog import error:", err);
     }
   }
 

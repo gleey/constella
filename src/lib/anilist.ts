@@ -79,6 +79,7 @@ query ($search: String, $page: Int, $perPage: Int) {
 const DISCOVERY_QUERY = `
 query ($page: Int, $perPage: Int, $countryOfOrigin: CountryCode, $sort: [MediaSort]) {
   Page(page: $page, perPage: $perPage) {
+    pageInfo { lastPage total }
     media(type: MANGA, sort: $sort, countryOfOrigin: $countryOfOrigin) {
       id
       title { romaji english native }
@@ -159,10 +160,17 @@ export async function searchMedia(search: string, limit = 10): Promise<SearchRes
   }));
 }
 
+export interface DiscoveryPage {
+  results: SearchResult[];
+  lastPage: number;
+  total: number;
+}
+
 /**
- * Dynamically fetch popular or trending manhwa/manga without any hardcoding.
+ * Fetch one page of popular/trending manhwa/manga with pagination metadata.
+ * Used by the catalog importer to walk the AniList discovery feed.
  */
-export async function fetchPopularMedia({
+export async function fetchPopularMediaPage({
   page = 1,
   perPage = 15,
   countryOfOrigin = "KR", // Korean webtoons/manhwa by default, or "JP" for manga
@@ -172,12 +180,17 @@ export async function fetchPopularMedia({
   perPage?: number;
   countryOfOrigin?: string;
   sort?: string[];
-} = {}): Promise<SearchResult[]> {
-  const cacheKey = `anilist:popular:${page}:${perPage}:${countryOfOrigin}:${sort.join(",")}`;
-  const cached = cacheGet<SearchResult[]>(cacheKey);
+} = {}): Promise<DiscoveryPage> {
+  const cacheKey = `anilist:discovery-page:${page}:${perPage}:${countryOfOrigin}:${sort.join(",")}`;
+  const cached = cacheGet<DiscoveryPage>(cacheKey);
   if (cached) return cached;
 
-  const data = await gql<{ Page: { media: AniListMedia[] } }>(DISCOVERY_QUERY, {
+  const data = await gql<{
+    Page: {
+      pageInfo?: { lastPage?: number; total?: number };
+      media: AniListMedia[];
+    };
+  }>(DISCOVERY_QUERY, {
     page,
     perPage,
     countryOfOrigin,
@@ -197,8 +210,27 @@ export async function fetchPopularMedia({
     synonyms: m.synonyms || [],
   }));
 
-  cacheSet(cacheKey, results, ANILIST_CACHE_TTL);
-  return results;
+  const result: DiscoveryPage = {
+    results,
+    lastPage: data.Page?.pageInfo?.lastPage || page,
+    total: data.Page?.pageInfo?.total || results.length,
+  };
+
+  cacheSet(cacheKey, result, ANILIST_CACHE_TTL);
+  return result;
+}
+
+/**
+ * Dynamically fetch popular or trending manhwa/manga without any hardcoding.
+ */
+export async function fetchPopularMedia(options: {
+  page?: number;
+  perPage?: number;
+  countryOfOrigin?: string;
+  sort?: string[];
+} = {}): Promise<SearchResult[]> {
+  const page = await fetchPopularMediaPage(options);
+  return page.results;
 }
 
 export async function fetchMediaDetail(anilistId: number): Promise<MediaDetail> {
