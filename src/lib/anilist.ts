@@ -77,16 +77,17 @@ query ($search: String, $page: Int, $perPage: Int) {
 }`;
 
 const DISCOVERY_QUERY = `
-query ($page: Int, $perPage: Int, $countryOfOrigin: CountryCode, $sort: [MediaSort]) {
+query ($page: Int, $perPage: Int, $countryOfOrigin: CountryCode, $sort: [MediaSort], $status: MediaStatus) {
   Page(page: $page, perPage: $perPage) {
     pageInfo { lastPage total }
-    media(type: MANGA, sort: $sort, countryOfOrigin: $countryOfOrigin) {
+    media(type: MANGA, sort: $sort, countryOfOrigin: $countryOfOrigin, status: $status) {
       id
       title { romaji english native }
       coverImage { extraLarge large medium }
       chapters
       countryOfOrigin
       format
+      status
       synonyms
     }
   }
@@ -175,13 +176,15 @@ export async function fetchPopularMediaPage({
   perPage = 15,
   countryOfOrigin = "KR", // Korean webtoons/manhwa by default, or "JP" for manga
   sort = ["POPULARITY_DESC"],
+  status,
 }: {
   page?: number;
   perPage?: number;
   countryOfOrigin?: string;
   sort?: string[];
+  status?: string;
 } = {}): Promise<DiscoveryPage> {
-  const cacheKey = `anilist:discovery-page:${page}:${perPage}:${countryOfOrigin}:${sort.join(",")}`;
+  const cacheKey = `anilist:discovery-page:${page}:${perPage}:${countryOfOrigin}:${sort.join(",")}:${status || "ALL"}`;
   const cached = cacheGet<DiscoveryPage>(cacheKey);
   if (cached) return cached;
 
@@ -195,6 +198,7 @@ export async function fetchPopularMediaPage({
     perPage,
     countryOfOrigin,
     sort,
+    status: status || undefined,
   });
 
   const results = (data.Page?.media || []).map((m) => ({
@@ -228,6 +232,7 @@ export async function fetchPopularMedia(options: {
   perPage?: number;
   countryOfOrigin?: string;
   sort?: string[];
+  status?: string;
 } = {}): Promise<SearchResult[]> {
   const page = await fetchPopularMediaPage(options);
   return page.results;

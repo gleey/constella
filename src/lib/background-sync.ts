@@ -93,10 +93,13 @@ async function runCatalogSync(targetAnilistId?: number) {
     const existingIds = new Set(dbMedia.map((m) => m.anilistId));
     targets = dbMedia.map((m) => ({ anilistId: m.anilistId, titleHint: m.title }));
 
-    // 2. Auto-discover top popular manhwa from AniList — fully automatic, no admin needed
+    // 2. Auto-discover top popular + recently updated ongoing manhwa & manga from AniList
     try {
-      const popular = await fetchPopularMedia({ page: 1, perPage: 15, countryOfOrigin: "KR", sort: ["POPULARITY_DESC"] });
-      for (const p of popular) {
+      const [popular, ongoing] = await Promise.all([
+        fetchPopularMedia({ page: 1, perPage: 20, countryOfOrigin: "KR", sort: ["POPULARITY_DESC"] }),
+        fetchPopularMedia({ page: 1, perPage: 20, countryOfOrigin: "KR", sort: ["UPDATED_AT_DESC"], status: "RELEASING" }),
+      ]);
+      for (const p of [...popular, ...ongoing]) {
         if (!existingIds.has(p.id)) {
           existingIds.add(p.id);
           targets.push({ anilistId: p.id, titleHint: p.title });

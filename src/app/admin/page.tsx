@@ -296,6 +296,32 @@ export default function AdminPage() {
     }
   };
 
+  // Handle sync ongoing releases
+  const handleSyncOngoing = async () => {
+    setIsSyncing(true);
+    setSyncStatus("Syncing ongoing manhwa/manga updates...");
+    try {
+      const res = await fetch("/api/admin/catalog-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "ongoing", maxPages: 3 }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncStatus(
+          `Ongoing sync done — ${data.imported} new, ${data.updated} updated across ${data.pages} page(s).`,
+        );
+        await loadMedia();
+      } else {
+        setSyncStatus(`Sync error: ${data.error}`);
+      }
+    } catch (err) {
+      setSyncStatus(`Network error: ${err}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   // Handle 1-click Fast Seed Sync
   const handleFastSeedSync = async () => {
     setIsSyncing(true);
@@ -517,6 +543,18 @@ export default function AdminPage() {
                   <path d="M21 3v6h-6" />
                 </svg>
                 {isSyncing ? "Working..." : "Load Full Catalog"}
+              </button>
+              <button
+                onClick={handleSyncOngoing}
+                disabled={isSyncing || bgStatus?.isRunning}
+                className="px-4 py-2 rounded-full bg-sky-400/10 hover:bg-sky-400/20 text-sky-300 text-xs sm:text-sm font-semibold ring-1 ring-sky-400/25 transition-colors flex items-center gap-2 disabled:opacity-50"
+                title="Update chapter & rilis terbaru untuk seri ongoing/releasing."
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                Sync Ongoing
               </button>
               <button
                 onClick={() => handleStartLoreSync()}

@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
-import { importCatalog } from "@/lib/catalog-import";
+import { importCatalog, syncOngoingReleases } from "@/lib/catalog-import";
 
 /** POST /api/admin/catalog-import — bulk-import AniList catalog metadata. */
 export async function POST(request: Request) {
-  let body: { countries?: string[]; maxPages?: number; perPage?: number } = {};
+  let body: {
+    countries?: string[];
+    maxPages?: number;
+    perPage?: number;
+    mode?: "all" | "ongoing";
+    status?: string;
+  } = {};
   try {
     body = await request.json();
   } catch {
@@ -21,7 +27,17 @@ export async function POST(request: Request) {
   const perPage = 50;
 
   try {
-    const result = await importCatalog({ countries, maxPages, perPage });
+    let result;
+    if (body.mode === "ongoing") {
+      result = await syncOngoingReleases({ maxPages: Math.min(5, maxPages), countries });
+    } else {
+      result = await importCatalog({
+        countries,
+        maxPages,
+        perPage,
+        status: body.status,
+      });
+    }
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("Catalog import route failed:", error);

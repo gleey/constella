@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "sync:daemon": "npx tsx scripts/run-background-daemon.ts",
+    "sync:catalog": "npx tsx scripts/sync-catalog-continuous.ts",
+    "sync:ongoing": "npx tsx scripts/sync-catalog-continuous.ts --ongoingOnly",
     "sync:repair": "npx tsx scripts/sync-all-live-images.ts"
   },
   "dependencies": {

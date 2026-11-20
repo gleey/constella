@@ -15,6 +15,8 @@ interface ImportOptions {
   /** Maximum discovery pages per country. */
   maxPages?: number;
   perPage?: number;
+  status?: string;
+  sort?: string[];
 }
 
 const COUNTRY_TYPE: Record<string, string> = {
@@ -43,10 +45,12 @@ export function importCatalog({
   countries = ["KR", "JP"],
   maxPages = 6,
   perPage = 50,
+  status,
+  sort = ["POPULARITY_DESC"],
 }: ImportOptions = {}): Promise<CatalogImportResult> {
   if (inFlight) return inFlight;
 
-  inFlight = runImport({ countries, maxPages, perPage }).finally(() => {
+  inFlight = runImport({ countries, maxPages, perPage, status, sort }).finally(() => {
     inFlight = null;
   });
   return inFlight;
@@ -56,7 +60,11 @@ async function runImport({
   countries,
   maxPages,
   perPage,
-}: Required<ImportOptions>): Promise<CatalogImportResult> {
+  status,
+  sort,
+}: Required<Pick<ImportOptions, "countries" | "maxPages" | "perPage" | "sort">> & {
+  status?: string;
+}): Promise<CatalogImportResult> {
   const result: CatalogImportResult = {
     imported: 0,
     updated: 0,
@@ -73,6 +81,8 @@ async function runImport({
           page,
           perPage,
           countryOfOrigin: country,
+          status,
+          sort,
         });
       } catch (error) {
         console.error(`Catalog import failed for ${country} page ${page}:`, error);
@@ -141,4 +151,24 @@ async function runImport({
   }
 
   return result;
+}
+
+/**
+ * Specifically synchronizes ongoing manga/manhwa that received recent updates.
+ * Sorts by UPDATED_AT_DESC on AniList with status RELEASING to catch latest chapters.
+ */
+export async function syncOngoingReleases({
+  maxPages = 3,
+  countries = ["KR", "JP"],
+}: {
+  maxPages?: number;
+  countries?: string[];
+} = {}): Promise<CatalogImportResult> {
+  return importCatalog({
+    countries,
+    maxPages,
+    perPage: 50,
+    status: "RELEASING",
+    sort: ["UPDATED_AT_DESC"],
+  });
 }
