@@ -123,6 +123,21 @@ function SearchIcon({ className }: { className?: string }) {
   );
 }
 
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      className={className}
+      aria-hidden
+    >
+      <path d="M6 8l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export default function HomePage() {
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
   const [search, setSearch] = useState("");
@@ -148,37 +163,6 @@ export default function HomePage() {
     }
     loadMedia();
   }, []);
-
-  // Compute category counts
-  const counts = useMemo(() => {
-    let safe = 0;
-    let suggestive = 0;
-    let releasing = 0;
-    let finished = 0;
-    let manhwa = 0;
-    let manga = 0;
-
-    for (const m of mediaList) {
-      if (m.type === "MANHWA") manhwa++;
-      else if (m.type === "MANGA") manga++;
-
-      if (m.contentRating === "SUGGESTIVE_18") suggestive++;
-      else safe++;
-
-      if (m.status === "RELEASING") releasing++;
-      else if (m.status === "FINISHED") finished++;
-    }
-
-    return {
-      total: mediaList.length,
-      manhwa,
-      manga,
-      safe,
-      suggestive,
-      releasing,
-      finished,
-    };
-  }, [mediaList]);
 
   // Featured rail tampil acak tiap kali halaman dibuka, tanpa mengubah
   // urutan katalog di bawah (tetap urutan API).
@@ -229,13 +213,6 @@ export default function HomePage() {
     if (carouselRef.current) {
       carouselRef.current.scrollBy({ left: 340, behavior: "smooth" });
     }
-  };
-
-  const tabs = ["ALL", "MANHWA", "MANGA"] as const;
-  const tabLabels: Record<string, string> = {
-    ALL: `All (${counts.total})`,
-    MANHWA: `Manhwa (${counts.manhwa})`,
-    MANGA: `Manga (${counts.manga})`,
   };
 
   return (
@@ -398,7 +375,7 @@ export default function HomePage() {
                 Manga &amp; Manhwa Catalog
               </h2>
               <p className="text-sm text-slate-400 mt-1.5">
-                Select any story map to explore chapter-by-chapter character journeys ({filteredMedia.length} of {mediaList.length} titles)
+                Select any story map to explore chapter-by-chapter character journeys
               </p>
             </div>
 
@@ -428,72 +405,64 @@ export default function HomePage() {
 
           {/* Filter Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-white/[0.02] ring-1 ring-white/10">
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Type filter tabs */}
-              <div className="flex items-center p-1 bg-white/[0.04] ring-1 ring-white/10 rounded-full text-xs font-semibold text-slate-400">
-                {tabs.map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setSelectedType(t)}
-                    className={`px-3 py-1 rounded-full transition cursor-pointer ${
-                      selectedType === t
-                        ? "bg-indigo-500/20 text-[#c7d2fe] ring-1 ring-indigo-500/40"
-                        : "hover:text-slate-200"
-                    }`}
-                  >
-                    {tabLabels[t]}
-                  </button>
-                ))}
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+              {/* Type filter dropdown */}
+              <div className="relative inline-flex items-center">
+                <select
+                  value={selectedType}
+                  onChange={(e) => setSelectedType(e.target.value)}
+                  aria-label="Filter Type"
+                  className={`appearance-none h-9 pl-3.5 pr-8 rounded-xl text-xs font-medium focus:outline-none transition cursor-pointer ${
+                    selectedType !== "ALL"
+                      ? "bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-500/40 focus:ring-2 focus:ring-indigo-500"
+                      : "bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-500/60"
+                  }`}
+                >
+                  <option value="ALL" className="bg-[#0f172a] text-slate-200">All Types</option>
+                  <option value="MANHWA" className="bg-[#0f172a] text-slate-200">Manhwa</option>
+                  <option value="MANGA" className="bg-[#0f172a] text-slate-200">Manga</option>
+                </select>
+                <ChevronDownIcon className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
               </div>
 
-              {/* Release Status filter */}
-              <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-[11px] font-medium text-slate-400 ml-1">Status:</span>
-                <div className="flex items-center p-1 bg-white/[0.04] ring-1 ring-white/10 rounded-full font-semibold text-slate-400">
-                  {[
-                    { id: "ALL", label: "All" },
-                    { id: "RELEASING", label: `Releasing (${counts.releasing})` },
-                    { id: "FINISHED", label: `Finished (${counts.finished})` },
-                  ].map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => setSelectedStatus(s.id)}
-                      className={`px-2.5 py-1 rounded-full transition cursor-pointer ${
-                        selectedStatus === s.id
-                          ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/40"
-                          : "hover:text-slate-200"
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
+              {/* Status filter dropdown */}
+              <div className="relative inline-flex items-center">
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  aria-label="Filter Status"
+                  className={`appearance-none h-9 pl-3.5 pr-8 rounded-xl text-xs font-medium focus:outline-none transition cursor-pointer ${
+                    selectedStatus !== "ALL"
+                      ? "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/40 focus:ring-2 focus:ring-sky-500"
+                      : "bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-500/60"
+                  }`}
+                >
+                  <option value="ALL" className="bg-[#0f172a] text-slate-200">All Status</option>
+                  <option value="RELEASING" className="bg-[#0f172a] text-slate-200">Releasing</option>
+                  <option value="FINISHED" className="bg-[#0f172a] text-slate-200">Finished</option>
+                </select>
+                <ChevronDownIcon className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
               </div>
 
-              {/* Content Rating filter */}
-              <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-[11px] font-medium text-slate-400 ml-1">Rating:</span>
-                <div className="flex items-center p-1 bg-white/[0.04] ring-1 ring-white/10 rounded-full font-semibold text-slate-400">
-                  {[
-                    { id: "ALL", label: "All" },
-                    { id: "SAFE", label: `Safe (${counts.safe})` },
-                    { id: "SUGGESTIVE_18", label: `Suggestive/18+ (${counts.suggestive})` },
-                  ].map((r) => (
-                    <button
-                      key={r.id}
-                      onClick={() => setSelectedRating(r.id)}
-                      className={`px-2.5 py-1 rounded-full transition cursor-pointer ${
-                        selectedRating === r.id
-                          ? r.id === "SUGGESTIVE_18"
-                            ? "bg-rose-500/20 text-rose-200 ring-1 ring-rose-500/40"
-                            : "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40"
-                          : "hover:text-slate-200"
-                      }`}
-                    >
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
+              {/* Content Rating filter dropdown */}
+              <div className="relative inline-flex items-center">
+                <select
+                  value={selectedRating}
+                  onChange={(e) => setSelectedRating(e.target.value)}
+                  aria-label="Filter Content Rating"
+                  className={`appearance-none h-9 pl-3.5 pr-8 rounded-xl text-xs font-medium focus:outline-none transition cursor-pointer ${
+                    selectedRating !== "ALL"
+                      ? selectedRating === "SUGGESTIVE_18"
+                        ? "bg-rose-500/15 text-rose-200 ring-1 ring-rose-500/40 focus:ring-2 focus:ring-rose-500"
+                        : "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/40 focus:ring-2 focus:ring-emerald-500"
+                      : "bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-500/60"
+                  }`}
+                >
+                  <option value="ALL" className="bg-[#0f172a] text-slate-200">All Content</option>
+                  <option value="SAFE" className="bg-[#0f172a] text-slate-200">Safe</option>
+                  <option value="SUGGESTIVE_18" className="bg-[#0f172a] text-slate-200">Suggestive / 18+</option>
+                </select>
+                <ChevronDownIcon className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
               </div>
             </div>
 
