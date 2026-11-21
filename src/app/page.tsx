@@ -174,6 +174,14 @@ function RotateCcwIcon({ className }: { className?: string }) {
   );
 }
 
+function SparklesIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+    </svg>
+  );
+}
+
 /** Custom themed dropdown that replaces native <select> for dark-mode consistency. */
 function FilterDropdown({
   value,
@@ -278,6 +286,10 @@ function FilterDropdown({
 export default function HomePage() {
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
   const [search, setSearch] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [selectedType, setSelectedType] = useState<string>("ALL");
   const [selectedRating, setSelectedRating] = useState<string>("SAFE");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
@@ -288,6 +300,45 @@ export default function HomePage() {
   const dragStartX = useRef(0);
   const dragStartScrollLeft = useRef(0);
   const isDragThresholdPassed = useRef(false);
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsSearchOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Global shortcut: ⌘K or / to focus search
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (
+        document.activeElement === searchInputRef.current ||
+        (document.activeElement?.tagName === "INPUT" && document.activeElement !== searchInputRef.current) ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        if (e.key === "Escape") {
+          setIsSearchOpen(false);
+          searchInputRef.current?.blur();
+        }
+        return;
+      }
+
+      if ((e.key === "k" && (e.metaKey || e.ctrlKey)) || e.key === "/") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        setIsSearchOpen(true);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 && e.pointerType === "mouse") return;
@@ -384,6 +435,45 @@ export default function HomePage() {
       return true;
     });
   }, [mediaList, search, selectedType, selectedRating, selectedStatus]);
+
+  // Extract popular genres dynamically from media catalog
+  const popularGenres = useMemo(() => {
+    const genreMap: Record<string, number> = {};
+    for (const m of mediaList) {
+      const genres = m.genres || MEDIA_META[m.title]?.genres || [];
+      for (const g of genres) {
+        genreMap[g] = (genreMap[g] || 0) + 1;
+      }
+    }
+    const sorted = Object.entries(genreMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name]) => name);
+
+    return sorted.length > 0
+      ? sorted.slice(0, 8)
+      : ["Action", "Fantasy", "Murim", "Adventure", "Reincarnation", "Supernatural", "Tower", "Comedy"];
+  }, [mediaList]);
+
+  // Featured recommendation series (up to 5 series)
+  const recommendedSeries = useMemo(() => {
+    return mediaList.slice(0, 5);
+  }, [mediaList]);
+
+  // Dynamic search suggestions matching title / type / genre
+  const searchSuggestions = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.toLowerCase();
+    return mediaList
+      .filter((m) => {
+        const matchTitle = m.title.toLowerCase().includes(q);
+        const matchType = m.type.toLowerCase().includes(q);
+        const matchGenre = (m.genres || MEDIA_META[m.title]?.genres)?.some((g) =>
+          g.toLowerCase().includes(q)
+        );
+        return matchTitle || matchType || matchGenre;
+      })
+      .slice(0, 6);
+  }, [mediaList, search]);
 
   const scrollLeft = () => {
     if (carouselRef.current) {
@@ -565,38 +655,288 @@ export default function HomePage() {
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-14 flex-1 w-full"
       >
         <div className="relative z-30 flex flex-col gap-6 mb-8">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-5">
+          {/* Header Title with stats */}
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">
+                  Exploration Hub
+                </span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
                 Manga &amp; Manhwa Catalog
               </h2>
-              <p className="text-sm text-slate-400 mt-1.5">
-                Select any story map to explore chapter-by-chapter character journeys
+              <p className="text-sm text-slate-400 mt-1">
+                Jelajahi alur karakter bab demi bab dengan visualisasi graf bebas spoiler
               </p>
             </div>
+            <div className="flex items-center gap-2 self-start sm:self-end">
+              <span className="px-3 py-1 rounded-full text-xs font-mono font-semibold bg-white/5 border border-white/10 text-slate-300">
+                {filteredMedia.length} / {mediaList.length} Series
+              </span>
+            </div>
+          </div>
 
-            {/* Search input */}
-            <div className="relative w-full md:w-72">
+          {/* Broadened, Prominent Search Bar with Clear Outline */}
+          <div ref={searchContainerRef} className="relative w-full">
+            <div
+              className={`relative flex items-center w-full h-12 sm:h-14 px-4 rounded-2xl bg-[#0f172a]/95 backdrop-blur-xl border-2 transition-all duration-200 shadow-xl ${
+                isSearchOpen || isSearchFocused
+                  ? "border-indigo-400 ring-4 ring-indigo-500/25 shadow-indigo-950/50"
+                  : "border-indigo-500/40 hover:border-indigo-400/80 ring-1 ring-white/10 shadow-black/40"
+              }`}
+            >
+              <SearchIcon className="w-5 h-5 text-indigo-400 shrink-0 mr-3 pointer-events-none" />
               <input
+                ref={searchInputRef}
                 type="text"
-                placeholder="Search title, genre..."
+                placeholder="Cari judul cerita, genre, atau alternatif nama... (Tekan / atau ⌘K)"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full h-10 pl-9 pr-9 bg-white/[0.04] ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-500/60 rounded-full text-xs text-white placeholder-slate-500 focus:outline-none transition"
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setIsSearchOpen(true);
+                }}
+                onFocus={() => {
+                  setIsSearchFocused(true);
+                  setIsSearchOpen(true);
+                }}
+                onBlur={() => setIsSearchFocused(false)}
+                className="w-full bg-transparent text-sm sm:text-base text-white placeholder-slate-400 focus:outline-none font-medium"
               />
-              <SearchIcon className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              {search && (
+
+              {/* Clear search button */}
+              {search ? (
                 <button
-                  onClick={() => setSearch("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition cursor-pointer"
+                  type="button"
+                  onClick={() => {
+                    setSearch("");
+                    searchInputRef.current?.focus();
+                  }}
+                  className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer mr-2 shrink-0"
                   aria-label="Clear search"
                 >
-                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
                     <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
                   </svg>
                 </button>
-              )}
+              ) : null}
+
+              {/* Keyboard shortcut hint */}
+              <div className="hidden sm:flex items-center gap-1 shrink-0 text-[11px] font-mono text-slate-400 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 select-none">
+                <span className="font-semibold text-slate-300">⌘K</span>
+                <span className="text-slate-500">/</span>
+                <span className="font-semibold text-slate-300">/</span>
+              </div>
             </div>
+
+            {/* Dropdown Suggestions / Live Autocomplete */}
+            {isSearchOpen && (
+              <div className="absolute top-full left-0 right-0 mt-2 p-3 bg-[#0d1424]/98 backdrop-blur-2xl rounded-2xl border-2 border-indigo-500/30 ring-1 ring-white/10 shadow-2xl shadow-black/80 z-50 animate-fade-in divide-y divide-white/10 max-h-96 overflow-y-auto">
+                {search.trim() ? (
+                  <div>
+                    <div className="px-3 py-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      <span>Hasil Pencarian Judul &amp; Genre ({searchSuggestions.length})</span>
+                      <span className="text-indigo-400 font-mono font-normal">Esc untuk menutup</span>
+                    </div>
+                    {searchSuggestions.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-slate-400">
+                        <p className="font-semibold text-slate-300">
+                          Tidak ada cerita yang cocok dengan &ldquo;{search}&rdquo;
+                        </p>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Coba gunakan kata kunci genre seperti Action, Murim, Fantasy, atau cek ejaan nama.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setSearch("")}
+                          className="mt-3 px-3 py-1 rounded-lg text-xs font-semibold bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 transition cursor-pointer"
+                        >
+                          Reset Pencarian
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-white/5">
+                        {searchSuggestions.map((m) => {
+                          const meta = MEDIA_META[m.title];
+                          const genres = m.genres || meta?.genres || [];
+                          return (
+                            <Link
+                              key={m.id}
+                              href={`/media/${m.id}`}
+                              onClick={() => setIsSearchOpen(false)}
+                              className="w-full px-3 py-2.5 flex items-center gap-3.5 hover:bg-indigo-500/10 rounded-xl transition-colors group cursor-pointer"
+                            >
+                              <div className="relative w-10 h-14 rounded-lg overflow-hidden ring-1 ring-white/10 bg-[#161f30] shrink-0">
+                                <Image
+                                  src={m.coverImage}
+                                  alt={m.title}
+                                  fill
+                                  className="object-cover"
+                                  unoptimized
+                                />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <span className="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30">
+                                    {m.type}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    {m.totalChapters} Chapters
+                                  </span>
+                                </div>
+                                <h4 className="text-xs sm:text-sm font-bold text-white group-hover:text-indigo-300 transition-colors truncate">
+                                  {m.title}
+                                </h4>
+                                {genres.length > 0 && (
+                                  <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                                    {genres.slice(0, 3).join(" • ")}
+                                  </p>
+                                )}
+                              </div>
+                              <span className="text-xs font-semibold text-indigo-400 group-hover:translate-x-1 transition-transform shrink-0 flex items-center gap-1">
+                                Buka Peta →
+                              </span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4 p-2">
+                    {/* Quick popular series */}
+                    <div>
+                      <div className="px-1 pb-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                        <span className="flex items-center gap-1.5">
+                          <SparklesIcon className="w-3.5 h-3.5 text-indigo-400" />
+                          Rekomendasi Cerita Populer
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {recommendedSeries.slice(0, 4).map((m) => (
+                          <Link
+                            key={m.id}
+                            href={`/media/${m.id}`}
+                            onClick={() => setIsSearchOpen(false)}
+                            className="flex items-center gap-2.5 p-2 rounded-xl bg-white/[0.02] hover:bg-indigo-500/10 border border-white/5 hover:border-indigo-500/30 transition group cursor-pointer"
+                          >
+                            <div className="relative w-8 h-10 rounded-md overflow-hidden ring-1 ring-white/10 shrink-0">
+                              <Image
+                                src={m.coverImage}
+                                alt={m.title}
+                                fill
+                                className="object-cover"
+                                unoptimized
+                              />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-bold text-white group-hover:text-indigo-300 truncate transition-colors">
+                                {m.title}
+                              </p>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {m.totalChapters} Ch. • {m.type}
+                              </span>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Quick categories */}
+                    <div className="pt-2 border-t border-white/5">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block px-1 mb-2">
+                        Kategori &amp; Genre Populer
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {popularGenres.map((genre) => (
+                          <button
+                            key={genre}
+                            type="button"
+                            onClick={() => {
+                              setSearch(genre);
+                              setIsSearchOpen(false);
+                            }}
+                            className="px-2.5 py-1 rounded-lg text-xs font-medium bg-white/5 hover:bg-indigo-500/20 hover:text-indigo-200 text-slate-300 border border-white/10 transition cursor-pointer"
+                          >
+                            #{genre}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Recommendation Chips (Always visible) */}
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            <span className="text-xs font-semibold text-slate-400 flex items-center gap-1.5 mr-1 shrink-0">
+              <SparklesIcon className="w-3.5 h-3.5 text-indigo-400" />
+              Rekomendasi Populer:
+            </span>
+
+            {/* Popular series quick chips */}
+            {recommendedSeries.slice(0, 4).map((m) => {
+              const isActive = search.trim().toLowerCase() === m.title.toLowerCase();
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    if (isActive) {
+                      setSearch("");
+                    } else {
+                      setSearch(m.title);
+                    }
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
+                    isActive
+                      ? "bg-indigo-500/25 text-indigo-200 border border-indigo-400 ring-2 ring-indigo-500/30 font-semibold"
+                      : "bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 border border-white/10 hover:border-white/20"
+                  }`}
+                >
+                  <span>🔥</span>
+                  <span>{m.title}</span>
+                  {isActive && (
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-indigo-300">
+                      <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
+                    </svg>
+                  )}
+                </button>
+              );
+            })}
+
+            {/* Popular genres quick chips */}
+            {popularGenres.slice(0, 5).map((genre) => {
+              const isActive = search.trim().toLowerCase() === genre.toLowerCase();
+              return (
+                <button
+                  key={genre}
+                  type="button"
+                  onClick={() => {
+                    if (isActive) {
+                      setSearch("");
+                    } else {
+                      setSearch(genre);
+                    }
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
+                    isActive
+                      ? "bg-indigo-500/25 text-indigo-200 border border-indigo-400 ring-2 ring-indigo-500/30 font-semibold"
+                      : "bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 border border-white/10 hover:border-white/20"
+                  }`}
+                >
+                  <span>#{genre}</span>
+                  {isActive && (
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-indigo-300">
+                      <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
+                    </svg>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           {/* Filter Bar */}
