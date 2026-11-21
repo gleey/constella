@@ -16,9 +16,11 @@
 /.next/
 /out/
 /build
+/.turbo
 
 # ==============================================================================
 # Environment Variables (NEVER commit secrets — use .env.example for template)
+# Includes ADMIN_SECRET, GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, DATABASE_URL
 # ==============================================================================
 .env
 .env.*
@@ -56,6 +58,13 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# ==============================================================================
+# Task & Session Artifacts (dev tooling)
+# ==============================================================================
+.tasks/
+.taskmaster/
+*.session
 
 # ==============================================================================
 # IDE / Editor

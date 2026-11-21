@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
   DEFAULT_ABOUT_CONTENT,
+  DEFAULT_METHODOLOGY_CONTENT,
   isSitePageSlug,
   type SitePageSlug,
 } from "@/lib/site-page";
@@ -10,6 +11,7 @@ type RouteContext = { params: Promise<{ slug: string }> };
 
 const DEFAULTS: Record<SitePageSlug, { title: string; content: string }> = {
   about: DEFAULT_ABOUT_CONTENT,
+  methodology: DEFAULT_METHODOLOGY_CONTENT,
 };
 
 /**

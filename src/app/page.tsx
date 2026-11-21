@@ -283,6 +283,8 @@ function FilterDropdown({
   );
 }
 
+const PAGE_SIZE = 24;
+
 export default function HomePage() {
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
   const [search, setSearch] = useState("");
@@ -293,6 +295,7 @@ export default function HomePage() {
   const [selectedType, setSelectedType] = useState<string>("ALL");
   const [selectedRating, setSelectedRating] = useState<string>("SAFE");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const carouselRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -435,6 +438,16 @@ export default function HomePage() {
       return true;
     });
   }, [mediaList, search, selectedType, selectedRating, selectedStatus]);
+
+  // Reset pagination when search or filters change
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [search, selectedType, selectedRating, selectedStatus]);
+
+  // Slice displayed media for performance
+  const displayedMedia = useMemo(() => {
+    return filteredMedia.slice(0, visibleCount);
+  }, [filteredMedia, visibleCount]);
 
   // Extract popular genres dynamically from media catalog
   const popularGenres = useMemo(() => {
@@ -673,7 +686,9 @@ export default function HomePage() {
             </div>
             <div className="flex items-center gap-2 self-start sm:self-end">
               <span className="px-3 py-1 rounded-full text-xs font-mono font-semibold bg-white/5 border border-white/10 text-slate-300">
-                {filteredMedia.length} / {mediaList.length} Series
+                {displayedMedia.length < filteredMedia.length
+                  ? `${displayedMedia.length} dari ${filteredMedia.length} Series`
+                  : `${filteredMedia.length} / ${mediaList.length} Series`}
               </span>
             </div>
           </div>
@@ -870,75 +885,6 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* Quick Recommendation Chips (Always visible) */}
-          <div className="flex flex-wrap items-center gap-2 pt-0.5">
-            <span className="text-xs font-semibold text-slate-400 flex items-center gap-1.5 mr-1 shrink-0">
-              <SparklesIcon className="w-3.5 h-3.5 text-indigo-400" />
-              Rekomendasi Populer:
-            </span>
-
-            {/* Popular series quick chips */}
-            {recommendedSeries.slice(0, 4).map((m) => {
-              const isActive = search.trim().toLowerCase() === m.title.toLowerCase();
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => {
-                    if (isActive) {
-                      setSearch("");
-                    } else {
-                      setSearch(m.title);
-                    }
-                  }}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
-                    isActive
-                      ? "bg-indigo-500/25 text-indigo-200 border border-indigo-400 ring-2 ring-indigo-500/30 font-semibold"
-                      : "bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 border border-white/10 hover:border-white/20"
-                  }`}
-                >
-                  <span>🔥</span>
-                  <span>{m.title}</span>
-                  {isActive && (
-                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-indigo-300">
-                      <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-                    </svg>
-                  )}
-                </button>
-              );
-            })}
-
-            {/* Popular genres quick chips */}
-            {popularGenres.slice(0, 5).map((genre) => {
-              const isActive = search.trim().toLowerCase() === genre.toLowerCase();
-              return (
-                <button
-                  key={genre}
-                  type="button"
-                  onClick={() => {
-                    if (isActive) {
-                      setSearch("");
-                    } else {
-                      setSearch(genre);
-                    }
-                  }}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
-                    isActive
-                      ? "bg-indigo-500/25 text-indigo-200 border border-indigo-400 ring-2 ring-indigo-500/30 font-semibold"
-                      : "bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 border border-white/10 hover:border-white/20"
-                  }`}
-                >
-                  <span>#{genre}</span>
-                  {isActive && (
-                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-indigo-300">
-                      <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-                    </svg>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
           {/* Filter Bar */}
           <div className="relative z-30 flex flex-wrap items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-white/[0.02] ring-1 ring-white/10 backdrop-blur-sm">
             <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
@@ -1059,88 +1005,121 @@ export default function HomePage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-5 sm:gap-6">
-            {filteredMedia.map((m) => {
-              const meta = MEDIA_META[m.title];
-              return (
-                <Link
-                  key={m.id}
-                  href={`/media/${m.id}`}
-                  className="group rounded-2xl overflow-hidden bg-[#111827] ring-1 ring-white/5 hover:ring-indigo-500/60 hover:-translate-y-1 transition-all duration-300 shadow-lg shadow-black/40 hover:shadow-2xl hover:shadow-black/60 flex flex-col cursor-pointer"
-                >
-                  {/* Cover image */}
-                  <div className="relative w-full aspect-[3/4] bg-[#161f30] overflow-hidden">
-                    {m.coverImage ? (
-                      <Image
-                        src={m.coverImage}
-                        alt={m.title}
-                        fill
-                        className="object-cover group-hover:scale-105 transition-transform duration-500"
-                        unoptimized
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">
-                        No Cover
-                      </div>
-                    )}
-                    {/* Bottom scrim */}
-                    <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0b0f19]/80 to-transparent" />
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-5 sm:gap-6">
+              {displayedMedia.map((m) => {
+                const meta = MEDIA_META[m.title];
+                return (
+                  <Link
+                    key={m.id}
+                    href={`/media/${m.id}`}
+                    className="group rounded-2xl overflow-hidden bg-[#111827] ring-1 ring-white/5 hover:ring-indigo-500/60 hover:-translate-y-1 transition-all duration-300 shadow-lg shadow-black/40 hover:shadow-2xl hover:shadow-black/60 flex flex-col cursor-pointer"
+                  >
+                    {/* Cover image */}
+                    <div className="relative w-full aspect-[3/4] bg-[#161f30] overflow-hidden">
+                      {m.coverImage ? (
+                        <Image
+                          src={m.coverImage}
+                          alt={m.title}
+                          fill
+                          className="object-cover group-hover:scale-105 transition-transform duration-500"
+                          unoptimized
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">
+                          No Cover
+                        </div>
+                      )}
+                      {/* Bottom scrim */}
+                      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0b0f19]/80 to-transparent" />
 
-                    {/* Badges */}
-                    <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1.5 max-w-[78%]">
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-[#0b0f19]/85 text-[#7dd3fc] ring-1 ring-white/10 backdrop-blur-md">
-                        {m.type}
-                      </span>
-                      {m.status === "RELEASING" ? (
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide bg-[#0b0f19]/85 text-sky-400 ring-1 ring-sky-500/30 backdrop-blur-md flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
-                          Releasing
+                      {/* Badges */}
+                      <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1.5 max-w-[78%]">
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-[#0b0f19]/85 text-[#7dd3fc] ring-1 ring-white/10 backdrop-blur-md">
+                          {m.type}
                         </span>
-                      ) : m.status === "FINISHED" ? (
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-medium tracking-wide bg-[#0b0f19]/85 text-slate-300 ring-1 ring-white/10 backdrop-blur-md">
-                          Finished
-                        </span>
-                      ) : null}
-                      {m.contentRating === "SUGGESTIVE_18" && (
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wide bg-rose-950/90 text-rose-300 ring-1 ring-rose-500/40 backdrop-blur-md">
-                          18+
-                        </span>
+                        {m.status === "RELEASING" ? (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide bg-[#0b0f19]/85 text-sky-400 ring-1 ring-sky-500/30 backdrop-blur-md flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+                            Releasing
+                          </span>
+                        ) : m.status === "FINISHED" ? (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-medium tracking-wide bg-[#0b0f19]/85 text-slate-300 ring-1 ring-white/10 backdrop-blur-md">
+                            Finished
+                          </span>
+                        ) : null}
+                        {m.contentRating === "SUGGESTIVE_18" && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wide bg-rose-950/90 text-rose-300 ring-1 ring-rose-500/40 backdrop-blur-md">
+                            18+
+                          </span>
+                        )}
+                      </div>
+                      {meta?.rating && (
+                        <div className="absolute top-2.5 right-2.5">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0b0f19]/85 text-[#fcd34d] ring-1 ring-white/10 backdrop-blur-md flex items-center gap-1">
+                            <StarIcon className="w-2.5 h-2.5" />
+                            {meta.rating}
+                          </span>
+                        </div>
                       )}
                     </div>
-                    {meta?.rating && (
-                      <div className="absolute top-2.5 right-2.5">
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0b0f19]/85 text-[#fcd34d] ring-1 ring-white/10 backdrop-blur-md flex items-center gap-1">
-                          <StarIcon className="w-2.5 h-2.5" />
-                          {meta.rating}
-                        </span>
-                      </div>
-                    )}
-                  </div>
 
-                  {/* Info */}
-                  <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
-                    <div>
-                      <h3 className="text-sm font-bold text-white group-hover:text-[#a5b4fc] transition-colors line-clamp-1">
-                        {m.title}
-                      </h3>
-                      <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
-                        <span>{m.totalChapters} Ch.</span>
-                        <span aria-hidden>·</span>
-                        <span className="font-mono text-[10px] text-slate-500">
-                          {m.chapterNumberingSource}
-                        </span>
+                    {/* Info */}
+                    <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                      <div>
+                        <h3 className="text-sm font-bold text-white group-hover:text-[#a5b4fc] transition-colors line-clamp-1">
+                          {m.title}
+                        </h3>
+                        <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                          <span>{m.totalChapters} Ch.</span>
+                          <span aria-hidden>·</span>
+                          <span className="font-mono text-[10px] text-slate-500">
+                            {m.chapterNumberingSource}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="pt-2.5 border-t border-white/5 flex items-center justify-between text-xs font-semibold text-[#a5b4fc]">
+                        <span>View Story Map</span>
+                        <ArrowIcon className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                       </div>
                     </div>
+                  </Link>
+                );
+              })}
+            </div>
 
-                    <div className="pt-2.5 border-t border-white/5 flex items-center justify-between text-xs font-semibold text-[#a5b4fc]">
-                      <span>View Story Map</span>
-                      <ArrowIcon className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-                    </div>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
+            {/* Load More Button */}
+            {filteredMedia.length > visibleCount && (
+              <div className="mt-12 flex flex-col items-center justify-center gap-3">
+                <p className="text-xs text-slate-400 font-medium">
+                  Menampilkan <span className="text-white font-bold">{displayedMedia.length}</span> dari{" "}
+                  <span className="text-white font-bold">{filteredMedia.length}</span> cerita
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+                    className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-950/50 hover:shadow-indigo-500/25 ring-1 ring-white/10 transition-all cursor-pointer flex items-center gap-2"
+                  >
+                    <span>Tampilkan Lebih Banyak</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-white/20 text-white font-mono">
+                      +{Math.min(PAGE_SIZE, filteredMedia.length - visibleCount)}
+                    </span>
+                  </button>
+                  {filteredMedia.length > visibleCount + PAGE_SIZE && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleCount(filteredMedia.length)}
+                      className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-sm font-medium ring-1 ring-white/10 transition cursor-pointer"
+                    >
+                      Tampilkan Semua ({filteredMedia.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>

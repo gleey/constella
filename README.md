@@ -34,6 +34,9 @@ Membaca serial manga/manhwa berdurasi panjang (seperti *Tower of God*, *Omniscie
 | **Resilient AI Fallback Chain** | Mendukung rantai multi-model Gemini (`gemini-3.5-flash`, `gemini-3.5-flash-lite`, dll.) serta otomatis beralih ke **Groq API** (`openai/gpt-oss-120b`, `llama-3.3-70b-versatile`) jika terjadi limit TPM/429. |
 | **Name Resolution & Deduplication** | Algoritma pencocokan nama otomatis (*case-insensitive, alias matching, romanization deduplication*) untuk memetakan nama hasil ekstraksi LLM ke tabel karakter, lengkap dengan status antrean `UNRESOLVED` untuk verifikasi admin. |
 | **Admin CMS & Review Workflow** | Panel admin interaktif di `/admin` dan `/admin/review` untuk memvalidasi draft, mengoreksi timeline bab, mengubah status sensitivitas per entri, serta menyinkronkan data secara background daemon. |
+| **Catalog & Lore Coverage Dashboard** | Halaman `/status` menampilkan tingkat kedalaman data per seri (Tier 1–3) agar pengguna mengetahui seri mana yang sudah memiliki graph relasi aktif vs. hanya metadata dasar. |
+| **Methodology & Architecture Docs** | Halaman `/methodology` mendokumentasikan sistem Two-Layer Zero-Spoiler, pipeline Tier 1–3, dan proses auditing komunitas. |
+| **Data Attribution & License Compliance** | Halaman `/about` & global footer mencantumkan kredit wajib: **AniList GraphQL API** (metadata) & **Fandom Wikis CC-BY-SA 3.0** (profil karakter). |
 
 ---
 
@@ -98,6 +101,8 @@ constella/
 │   │   │   ├── admin/       # API sinkronisasi, relasi, dan review approval
 │   │   │   └── media/       # Public graph API (/api/media/[id]/graph?chapter=N)
 │   │   ├── media/[id]/      # Halaman interaktif Reader Graph Visualization
+│   │   ├── methodology/     # Halaman dokumentasi arsitektur & metodologi zero-spoiler
+│   │   ├── status/          # Halaman Catalog & Lore Coverage Dashboard (Tier 1–3)
 │   │   ├── globals.css      # Desain tema gelap modern (Tailwind v4)
 │   │   ├── layout.tsx       # Root layout & font Geist
 │   │   └── page.tsx         # Katalog media & beranda utama
@@ -107,19 +112,24 @@ constella/
 │   │   ├── CharacterModal.tsx    # Modal detail profil, status, & timeline karakter
 │   │   ├── CharacterSearch.tsx   # Fitur pencarian instan karakter pada kanvas
 │   │   ├── FloatingPanel.tsx     # Panel navigasi melayang & statistik graf
+│   │   ├── Footer.tsx            # Global footer dengan atribusi, lisensi, & navigasi
 │   │   ├── GraphCanvas.tsx       # Engine Cytoscape.js (orbit faksi, persistensi koordinat)
 │   │   ├── Navbar.tsx            # Bar navigasi utama
-│   │   └── SpoilerToggle.tsx     # Komponen reveal/collapse spoiler
+│   │   ├── SpoilerToggle.tsx     # Komponen reveal/collapse spoiler
+│   │   └── StatusClient.tsx      # Client component interaktif halaman /status (filter & search)
 │   ├── generated/prisma/    # Prisma client yang di-generate otomatis
 │   └── lib/
-│       ├── anilist.ts       # GraphQL client AniList (katalog judul, cover, karakter)
-│       ├── fandom.ts        # Scraper MediaWiki Fandom (paginasi kategori & infobox)
-│       ├── gemini.ts        # Gemini AI extractor (JSON schema, fallback chain ke Groq)
-│       ├── name-dedupe.ts   # Normalisasi nama & heuristik penggabungan duplikat
+│       ├── admin-auth.ts      # Utilitas otorisasi admin (ADMIN_SECRET via header/cookie)
+│       ├── anilist.ts         # GraphQL client AniList (katalog judul, cover, karakter)
+│       ├── fandom.ts          # Scraper MediaWiki Fandom (paginasi kategori & infobox)
+│       ├── gemini.ts          # Gemini AI extractor (JSON schema, fallback chain ke Groq)
+│       ├── middleware.ts      # Next.js middleware proteksi endpoint admin & mutasi
+│       ├── name-dedupe.ts     # Normalisasi nama & heuristik penggabungan duplikat
 │       ├── name-resolution.ts # Resolusi target nama LLM ke database Foreign Key
-│       ├── temporal.ts      # Validasi batasan waktu temporal validFrom/validUntil
+│       ├── temporal.ts        # Validasi batasan waktu temporal validFrom/validUntil
 │       ├── background-sync.ts # Engine sinkronisasi berkala otomatis
-│       └── prisma.ts        # Prisma client singleton
+│       ├── site-page.ts       # CMS halaman statis (about, methodology) editable via admin
+│       └── prisma.ts          # Prisma client singleton
 ├── tests/
 │   └── graph.test.ts        # Automated zero-spoiler leakage test suite
 ├── .env.example             # Template konfigurasi environment
@@ -173,6 +183,20 @@ GEMINI_MODEL="gemini-3.5-flash, gemini-3.5-flash-lite, gemini-flash-lite-latest,
 # Dapatkan Groq key di: https://console.groq.com/keys
 GROQ_API_KEY="your-groq-api-key"
 GROQ_MODEL="openai/gpt-oss-120b,llama-3.3-70b-versatile"
+
+# ==============================================================================
+# Security & Admin Authentication
+# ==============================================================================
+# Token rahasia yang melindungi seluruh endpoint admin & operasi mutasi.
+# Di lokal boleh nilai default; di production WAJIB di-set ke string acak panjang.
+ADMIN_SECRET="constella-admin-secret"
+
+# ==============================================================================
+# Serverless Stability (opsional)
+# ==============================================================================
+# Set "true" hanya di server/VM/VPS untuk mengaktifkan daemon in-app.
+# Biarkan kosong saat deploy serverless (Vercel) — gunakan cron eksternal.
+ENABLE_IN_APP_DAEMON=""
 ```
 
 ### 3. Setup Database & Migrasi
@@ -196,6 +220,10 @@ npm run dev
 
 Buka peramban di [http://localhost:3000](http://localhost:3000).
 
+### 5. Otorisasi Admin (Opsional untuk Lokal)
+
+Pada `NODE_ENV !== "production"` tanpa `ADMIN_SECRET`, endpoint admin dapat diakses tanpa token untuk mempermudah pengembangan. Untuk simulasi produksi, set `ADMIN_SECRET` di `.env` lalu buka halaman `/admin` dan klik **"Set Admin Token"** di header untuk menyimpan cookie sesi.
+
 ---
 
 ## 🛠️ CLI Skrip & Otomatisasi Data
@@ -205,9 +233,11 @@ Proyek ini menyediakan serangkaian skrip CLI untuk manajemen data katalog dan ek
 | Perintah | Deskripsi | Opsi Berguna |
 |---|---|---|
 | `npm run dev` | Menjalankan server Next.js lokal (Turbopack) | `-` |
-| `npm run build` | Melakukan build bundle production | `-` |
+| `npm run build` | Melakukan build bundle production (termasuk `postinstall: prisma generate`) | `-` |
 | `npm run lint` | Memeriksa kepatuhan kode dengan ESLint | `-` |
-| `npm run sync:daemon` | Menjalankan background worker daemon | Sinkronisasi per 6 jam |
+| `npm run sync:daemon` | Menjalankan background worker daemon (per 6 jam) | `-` |
+| `npm run sync:catalog` | Sinkronisasi katalog berkelanjutan | `-` |
+| `npm run sync:ongoing` | Update metadata seri yang masih ongoing/releasing | `-` |
 | `npm run sync:repair` | Memperbaiki dan memperbarui URL foto karakter live | `-` |
 | `npx tsx -r dotenv/config scripts/seed-popular.ts` | **Tier 1:** Bulk ingest katalog judul populer dari AniList (tanpa AI) | `--pages=2`<br>`--perPage=20`<br>`--limit=40`<br>`--dry-run` |
 | `npx tsx -r dotenv/config scripts/enrich-fandom.ts` | **Tier 2:** Ekstraksi dinamis kategori Fandom ke tabel review | `--title="Solo Leveling"`<br>`--limit=30`<br>`--dry-run` |
@@ -267,6 +297,11 @@ Mengembalikan graf relasi bebas-spoiler untuk judul `mediaId` di bab `N`.
 | `PATCH` | `/api/admin/relationships/[id]` | Mengubah rentang bab temporal (`validFrom`, `validUntil`) atau sensitivitas relasi |
 | `DELETE` | `/api/admin/relationships/[id]` | Menghapus relasi dari database |
 
+> **Otorisasi Admin:** Semua endpoint `/api/admin/*`, `DELETE /api/media/*`, dan `PUT /api/pages/*` dilindungi oleh **middleware edge** yang memvalidasi `ADMIN_SECRET` melalui salah satu:
+> - Header `x-admin-token: <secret>`
+> - Header `Authorization: Bearer <secret>`
+> - Cookie `admin_token=<secret>` (dapat di-set via UI `/admin`)
+
 ---
 
 ## 🧪 Pengujian (Automated Testing)
@@ -285,7 +320,22 @@ npx tsx tests/graph.test.ts
 
 ---
 
-## 📄 Lisensi & Hak Cipta
+## 📄 Lisensi, Atribusi & Hak Cipta
 
-Proyek Skripsi Sarjana — Dikembangkan oleh **Graciano Tilaar**.  
+Proyek Skripsi Sarjana — Dikembangkan oleh **Graciano Tilaar**.
 Hak Cipta Dilindungi Undang-Undang.
+
+### Atribusi Sumber Data (Wajib)
+
+Constella menyandarkan data pada dua sumber publik berikut dan wajib mencantumkan kreditnya:
+
+| Sumber | Kontribusi | Lisensi |
+|---|---|---|
+| **[AniList GraphQL API](https://anilist.co)** | Metadata judul, sampul resmi, genre, negara asal, dan status rilis manga/manhwa | ToS AniList (non-commercial) |
+| **[Fandom Community Wikis](https://fandom.com)** | Teks profil karakter, biografi, dan ringkasan alur cerita | [CC-BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
+
+Atribusi lengkap dapat dilihat pada halaman `/about` dan footer global yang tampil di seluruh halaman.
+
+### Atribusi Teknologi
+
+Dibangun di atas stack berikut: **Next.js 16** (App Router), **TypeScript 5**, **Prisma 7** + **PostgreSQL 17**, **Tailwind CSS 4**, **Cytoscape.js 3.34**, **Google Gemini SDK**, dan **Groq API**.

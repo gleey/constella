@@ -62,7 +62,63 @@ export default async function AboutPage() {
           ))}
         </div>
 
-        <div className="mt-12 rounded-2xl bg-white/[0.03] ring-1 ring-white/10 p-5 sm:p-6">
+        {/* Atribusi Sumber Data & Lisensi (Wajib) */}
+        <div className="mt-10 rounded-2xl bg-[#0e1626]/80 ring-1 ring-white/10 p-6 sm:p-7 space-y-5">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
+            <h2 className="text-base font-bold text-white tracking-tight">
+              Atribusi Sumber Data &amp; Lisensi (Wajib)
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            {/* AniList Credit */}
+            <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-white">AniList GraphQL API</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                  Metadata
+                </span>
+              </div>
+              <p className="text-slate-300 leading-relaxed">
+                Kredit penuh kepada{" "}
+                <a
+                  href="https://anilist.co"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-400 hover:text-indigo-300 underline underline-offset-2 font-medium"
+                >
+                  AniList API
+                </a>{" "}
+                untuk penyediaan metadata resmi judul, cover sampul, genre, negara asal, dan informasi status rilis manhwa &amp; manga.
+              </p>
+            </div>
+
+            {/* Fandom Wiki Credit */}
+            <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-white">Fandom Community Wikis</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                  CC-BY-SA 3.0
+                </span>
+              </div>
+              <p className="text-slate-300 leading-relaxed">
+                Kredit penuh kepada komunitas penggemar di Fandom Wikis untuk sumber teks biografi profil karakter dan ringkasan alur cerita di bawah lisensi{" "}
+                <a
+                  href="https://creativecommons.org/licenses/by-sa/3.0/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2 font-medium"
+                >
+                  Creative Commons Attribution-ShareAlike (CC-BY-SA 3.0)
+                </a>
+                .
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-10 rounded-2xl bg-white/[0.03] ring-1 ring-white/10 p-5 sm:p-6">
           <h2 className="text-sm font-semibold text-white">Keep exploring</h2>
           <p className="mt-2 text-sm text-slate-400">
             Jump into the catalog, pick a series, and move the chapter slider to

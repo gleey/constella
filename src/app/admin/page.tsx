@@ -110,6 +110,31 @@ export default function AdminPage() {
     isSensitive: false,
   });
 
+  const [adminToken, setAdminToken] = useState<string>("");
+  const [isTokenSet, setIsTokenSet] = useState<boolean>(true);
+  const [showTokenInput, setShowTokenInput] = useState<boolean>(false);
+
+  useEffect(() => {
+    const match = document.cookie.match(/(?:^|;\s*)admin_token=([^;]+)/);
+    const existing = match ? decodeURIComponent(match[1]) : (typeof window !== "undefined" ? localStorage.getItem("admin_token") : "") || "";
+    if (existing) {
+      setAdminToken(existing);
+      setIsTokenSet(true);
+      document.cookie = `admin_token=${encodeURIComponent(existing)}; path=/; max-age=2592000; SameSite=Lax`;
+    } else {
+      setIsTokenSet(false);
+    }
+  }, []);
+
+  const handleSaveAdminToken = (token: string) => {
+    setAdminToken(token);
+    document.cookie = `admin_token=${encodeURIComponent(token)}; path=/; max-age=2592000; SameSite=Lax`;
+    localStorage.setItem("admin_token", token);
+    setIsTokenSet(Boolean(token.trim()));
+    setShowTokenInput(false);
+    checkBgStatus();
+  };
+
   const loadMedia = async () => {
     try {
       const res = await fetch("/api/media");
@@ -599,6 +624,18 @@ export default function AdminPage() {
                 </svg>
                 Fast Seed
               </button>
+              <button
+                onClick={() => setShowTokenInput((v) => !v)}
+                className={`px-3 py-2 rounded-full text-xs font-semibold ring-1 transition-colors flex items-center gap-1.5 ${
+                  isTokenSet
+                    ? "bg-emerald-500/10 text-emerald-300 ring-emerald-500/20 hover:bg-emerald-500/20"
+                    : "bg-amber-500/10 text-amber-300 ring-amber-500/25 hover:bg-amber-500/20"
+                }`}
+                title="Atur token admin (ADMIN_SECRET) untuk otorisasi API"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${isTokenSet ? "bg-emerald-400" : "bg-amber-400 animate-pulse"}`} />
+                <span>{isTokenSet ? "Token Active" : "Set Admin Token"}</span>
+              </button>
               <Link
                 href="/"
                 className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 text-xs sm:text-sm font-medium ring-1 ring-white/10 transition-colors"
@@ -607,6 +644,40 @@ export default function AdminPage() {
               </Link>
             </div>
           </div>
+
+          {showTokenInput && (
+            <div className="mt-4 p-4 rounded-xl bg-white/[0.04] border border-white/10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs animate-fade-in">
+              <div className="space-y-0.5">
+                <p className="font-semibold text-white">Admin Authentication Token</p>
+                <p className="text-slate-400 text-[11px]">
+                  Masukkan token sesuai <code className="text-indigo-300">ADMIN_SECRET</code> di environment server agar permintaan API diizinkan.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={adminToken}
+                  onChange={(e) => setAdminToken(e.target.value)}
+                  placeholder="Paste admin token..."
+                  className="px-3 py-1.5 rounded-lg bg-black/40 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-400 w-full sm:w-64"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSaveAdminToken(adminToken)}
+                  className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors"
+                >
+                  Save Token
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTokenInput(false)}
+                  className="px-2 py-1.5 text-slate-400 hover:text-slate-200 text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {syncStatus && (
             <div className="mt-5 rounded-xl bg-[#818cf8]/10 px-4 py-3 text-xs text-[#c7d2fe] ring-1 ring-[#818cf8]/25">

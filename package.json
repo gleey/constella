@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "postinstall": "prisma generate",
     "sync:daemon": "npx tsx scripts/run-background-daemon.ts",
     "sync:catalog": "npx tsx scripts/sync-catalog-continuous.ts",
     "sync:ongoing": "npx tsx scripts/sync-catalog-continuous.ts --ongoingOnly",
