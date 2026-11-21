@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -171,6 +171,106 @@ function RotateCcwIcon({ className }: { className?: string }) {
       <path d="M3.5 10a6.5 6.5 0 1 1 1.9 4.6L2.5 17" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M2.5 12.5V17H7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+/** Custom themed dropdown that replaces native <select> for dark-mode consistency. */
+function FilterDropdown({
+  value,
+  onChange,
+  options,
+  icon: Icon,
+  ariaLabel,
+  activeClass,
+  inactiveClass,
+  iconActiveClass,
+  iconInactiveClass,
+  chevronClass,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  icon: React.ComponentType<{ className?: string }>;
+  ariaLabel: string;
+  activeClass: string;
+  inactiveClass: string;
+  iconActiveClass: string;
+  iconInactiveClass: string;
+  chevronClass?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const isActive = value !== options[0]?.value;
+  const selectedLabel = options.find((o) => o.value === value)?.label ?? "";
+
+  const close = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, close]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, close]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        className={`flex items-center gap-2 h-9 pl-3 pr-8 rounded-xl text-xs font-medium focus:outline-none transition cursor-pointer select-none ${
+          isActive ? activeClass : inactiveClass
+        }`}
+      >
+        <Icon className={`w-3.5 h-3.5 shrink-0 transition-colors ${isActive ? iconActiveClass : iconInactiveClass}`} />
+        <span className="whitespace-nowrap">{selectedLabel}</span>
+        <ChevronDownIcon
+          className={`w-3.5 h-3.5 absolute right-2.5 pointer-events-none transition-transform ${
+            open ? "rotate-180" : ""
+          } ${chevronClass ?? (isActive ? iconActiveClass : "text-slate-400")}`}
+        />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1.5 left-0 min-w-[140px] rounded-xl border border-white/10 bg-[#131b2e]/95 backdrop-blur-xl shadow-xl shadow-black/40 overflow-hidden animate-dropdown-in">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => {
+                onChange(opt.value);
+                close();
+              }}
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium transition-colors cursor-pointer ${
+                value === opt.value
+                  ? "bg-white/[0.08] text-white"
+                  : "text-slate-300 hover:bg-white/[0.06] hover:text-slate-100"
+              }`}
+            >
+              {value === opt.value && (
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 text-indigo-400" aria-hidden>
+                  <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
+                </svg>
+              )}
+              {value !== opt.value && <span className="w-3 shrink-0" />}
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -502,90 +602,74 @@ export default function HomePage() {
           <div className="flex flex-wrap items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-white/[0.02] ring-1 ring-white/10 backdrop-blur-sm">
             <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
               {/* Type filter dropdown */}
-              <div className="relative inline-flex items-center">
-                <LayersIcon
-                  className={`w-3.5 h-3.5 absolute left-3 pointer-events-none transition-colors ${
-                    selectedType !== "ALL" ? "text-indigo-400" : "text-slate-400"
-                  }`}
-                />
-                <select
-                  value={selectedType}
-                  onChange={(e) => setSelectedType(e.target.value)}
-                  aria-label="Filter Type"
-                  className={`appearance-none h-9 pl-8.5 pr-8 rounded-xl text-xs font-medium focus:outline-none transition cursor-pointer select-none ${
-                    selectedType !== "ALL"
-                      ? "bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-500/40 focus:ring-2 focus:ring-indigo-500"
-                      : "bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-500/60"
-                  }`}
-                >
-                  <option value="ALL" className="bg-[#131b2e] text-slate-200">All Types</option>
-                  <option value="MANHWA" className="bg-[#131b2e] text-slate-200">Manhwa</option>
-                  <option value="MANGA" className="bg-[#131b2e] text-slate-200">Manga</option>
-                </select>
-                <ChevronDownIcon className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
-              </div>
+              <FilterDropdown
+                value={selectedType}
+                onChange={setSelectedType}
+                ariaLabel="Filter Type"
+                icon={LayersIcon}
+                options={[
+                  { value: "ALL", label: "All Types" },
+                  { value: "MANHWA", label: "Manhwa" },
+                  { value: "MANGA", label: "Manga" },
+                ]}
+                activeClass="bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-500/40"
+                inactiveClass="bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 ring-1 ring-white/10"
+                iconActiveClass="text-indigo-400"
+                iconInactiveClass="text-slate-400"
+              />
 
               {/* Status filter dropdown */}
-              <div className="relative inline-flex items-center">
-                <PulseIcon
-                  className={`w-3.5 h-3.5 absolute left-3 pointer-events-none transition-colors ${
-                    selectedStatus !== "ALL" ? "text-sky-400" : "text-slate-400"
-                  }`}
-                />
-                <select
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  aria-label="Filter Status"
-                  className={`appearance-none h-9 pl-8.5 pr-8 rounded-xl text-xs font-medium focus:outline-none transition cursor-pointer select-none ${
-                    selectedStatus !== "ALL"
-                      ? "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/40 focus:ring-2 focus:ring-sky-500"
-                      : "bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-500/60"
-                  }`}
-                >
-                  <option value="ALL" className="bg-[#131b2e] text-slate-200">All Status</option>
-                  <option value="RELEASING" className="bg-[#131b2e] text-slate-200">Releasing</option>
-                  <option value="FINISHED" className="bg-[#131b2e] text-slate-200">Finished</option>
-                </select>
-                <ChevronDownIcon className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
-              </div>
+              <FilterDropdown
+                value={selectedStatus}
+                onChange={setSelectedStatus}
+                ariaLabel="Filter Status"
+                icon={PulseIcon}
+                options={[
+                  { value: "ALL", label: "All Status" },
+                  { value: "RELEASING", label: "Releasing" },
+                  { value: "FINISHED", label: "Finished" },
+                ]}
+                activeClass="bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/40"
+                inactiveClass="bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 ring-1 ring-white/10"
+                iconActiveClass="text-sky-400"
+                iconInactiveClass="text-slate-400"
+              />
 
               {/* Content Rating filter dropdown */}
-              <div className="relative inline-flex items-center">
-                <ShieldIcon
-                  className={`w-3.5 h-3.5 absolute left-3 pointer-events-none transition-colors ${
-                    selectedRating === "SUGGESTIVE_18"
-                      ? "text-rose-400"
-                      : selectedRating === "ALL"
-                      ? "text-amber-400"
-                      : "text-emerald-400"
-                  }`}
-                />
-                <select
-                  value={selectedRating}
-                  onChange={(e) => setSelectedRating(e.target.value)}
-                  aria-label="Filter Content Rating"
-                  className={`appearance-none h-9 pl-8.5 pr-8 rounded-xl text-xs font-medium focus:outline-none transition cursor-pointer select-none ${
-                    selectedRating === "SUGGESTIVE_18"
-                      ? "bg-rose-500/15 text-rose-200 ring-1 ring-rose-500/40 focus:ring-2 focus:ring-rose-500"
-                      : selectedRating === "ALL"
-                      ? "bg-amber-500/15 text-amber-200 ring-1 ring-amber-500/40 focus:ring-2 focus:ring-amber-500"
-                      : "bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30 focus:ring-2 focus:ring-emerald-500/60"
-                  }`}
-                >
-                  <option value="SAFE" className="bg-[#131b2e] text-slate-200">Safe Content</option>
-                  <option value="SUGGESTIVE_18" className="bg-[#131b2e] text-slate-200">Suggestive / 18+</option>
-                  <option value="ALL" className="bg-[#131b2e] text-slate-200">All Content</option>
-                </select>
-                <ChevronDownIcon
-                  className={`w-3.5 h-3.5 absolute right-2.5 pointer-events-none transition-colors ${
-                    selectedRating === "SUGGESTIVE_18"
-                      ? "text-rose-400/70"
-                      : selectedRating === "ALL"
-                      ? "text-amber-400/70"
-                      : "text-emerald-400/70"
-                  }`}
-                />
-              </div>
+              <FilterDropdown
+                value={selectedRating}
+                onChange={setSelectedRating}
+                ariaLabel="Filter Content Rating"
+                icon={ShieldIcon}
+                options={[
+                  { value: "SAFE", label: "Safe Content" },
+                  { value: "SUGGESTIVE_18", label: "Suggestive / 18+" },
+                  { value: "ALL", label: "All Content" },
+                ]}
+                activeClass={
+                  selectedRating === "SUGGESTIVE_18"
+                    ? "bg-rose-500/15 text-rose-200 ring-1 ring-rose-500/40"
+                    : selectedRating === "ALL"
+                    ? "bg-amber-500/15 text-amber-200 ring-1 ring-amber-500/40"
+                    : "bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30"
+                }
+                inactiveClass="bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30"
+                iconActiveClass={
+                  selectedRating === "SUGGESTIVE_18"
+                    ? "text-rose-400"
+                    : selectedRating === "ALL"
+                    ? "text-amber-400"
+                    : "text-emerald-400"
+                }
+                iconInactiveClass="text-emerald-400"
+                chevronClass={
+                  selectedRating === "SUGGESTIVE_18"
+                    ? "text-rose-400/70"
+                    : selectedRating === "ALL"
+                    ? "text-amber-400/70"
+                    : "text-emerald-400/70"
+                }
+              />
             </div>
 
             {/* Reset filters if any active */}
