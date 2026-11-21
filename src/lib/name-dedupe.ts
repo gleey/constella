@@ -61,6 +61,7 @@ const CURATED_PAIRS: Array<[string, string]> = [
   ["corinlocke", "corinloque"], // I Killed the Main Player
   ["alishaaden", "arishaaden"], // I Killed the Main Player
   ["seoriyeowang", "frostqueen"], // The Frozen Player Returns
+  ["jinhyeokseong", "jinhyeoksong"], // PIGPEN
 ];
 
 export type MergeReason = "canon-equal" | "token-reorder" | "curated-pair";

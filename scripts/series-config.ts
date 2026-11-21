@@ -79,6 +79,17 @@ const FANDOM_WIKI_OVERRIDES: Record<number, { fandomWiki: string; mainCharacters
   104973: { fandomWiki: "raeliana" },                      // The Reason Why Raeliana Ended Up at the Duke's Mansion
   179445: { fandomWiki: "solo-leveling-ragnarok" },        // Solo Leveling: Ragnarok
   118408: { fandomWiki: "villains-are-destined-to-die" },  // also: death-is-the-only-ending-for-the-villainess
+  113666: {
+    fandomWiki: "fffclass-trashero",
+    mainCharacters: ["Kang Han Soo", "Aqua", "Lanuvel", "Elfheim", "Boris", "Alex"],
+  }, // FFF-Class Trashero
+  108952: { fandomWiki: "webtoon#PIGPEN" },                // PIGPEN
+  118267: { fandomWiki: "vsbattles#God_of_Blackfield" },   // God of Blackfield
+  130566: { fandomWiki: "asurascans#Legend_of_Asura_–_The_Venom_Dragon" }, // Legend of an Asura - The Poison Dragon
+  147586: { fandomWiki: "the-perks-of-being-an-sclass-heroine" }, // The Perks of Being an S-Class Heroine
+  104271: { fandomWiki: "peerless-dad" },                  // Father, Unrivaled
+  129632: { fandomWiki: "the-tutorial-is-too-hard" },      // The Tutorial Is Too Tough!
+  113607: { fandomWiki: "the-descent-of-the-demonic-master" }, // Descent of the Demon Master
 };
 
 /**
@@ -116,8 +127,8 @@ async function fetchAniListSynonyms(ids: number[]): Promise<Map<number, string[]
         if (m.synonyms) titles.push(...m.synonyms);
         map.set(m.id, titles);
       }
-    } catch (err: any) {
-      console.warn(`[WIKI] Gagal fetch AniList synonyms batch ${i}: ${err.message}`);
+    } catch (err) {
+      console.warn(`[WIKI] Gagal fetch AniList synonyms batch ${i}: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (i + BATCH < ids.length) await new Promise((r) => setTimeout(r, 350));
   }
@@ -125,11 +136,14 @@ async function fetchAniListSynonyms(ids: number[]): Promise<Map<number, string[]
 }
 
 /**
- * Bangun konfigurasi untuk SEMUA media di database.
+ * Bangun konfigurasi untuk SEMUA media di database (atau satu target jika targetAnilistId diberikan).
  * Seri baru otomatis ikut: subdomain wiki Fandom di-resolve dari judul + sinonim AniList.
  */
-export async function buildSeriesConfigs(): Promise<SeriesMapping[]> {
-  const medias = await prisma.media.findMany({ orderBy: { createdAt: "asc" } });
+export async function buildSeriesConfigs(targetAnilistId?: number | null): Promise<SeriesMapping[]> {
+  const medias = await prisma.media.findMany({
+    where: targetAnilistId ? { anilistId: targetAnilistId } : undefined,
+    orderBy: { createdAt: "asc" },
+  });
 
   // Pre-fetch AniList synonyms for media that don't have overrides
   const idsNeedingSynonyms = medias

@@ -420,7 +420,7 @@ async function main() {
 
   console.log("Memulai Auto-Enrichment Pipeline untuk seluruh katalog...");
 
-  for (const config of await buildSeriesConfigs()) {
+  for (const config of await buildSeriesConfigs(targetId)) {
     if (targetId && config.anilistId !== targetId) continue;
     await enrichMedia(config);
   }

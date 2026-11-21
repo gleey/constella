@@ -10,11 +10,28 @@ import { cacheGet, cacheSet } from "./api-cache";
 const FANDOM_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 hours
 
 /**
- * Build Fandom wiki API URL for a given wiki subdomain.
+ * Parse wiki target that may be either a standalone subdomain ("solo-leveling")
+ * or a multi-series hub target ("webtoon#PIGPEN", "vsbattles#God_of_Blackfield").
+ */
+export function parseWikiTarget(target: string): { subdomain: string; pageTitle?: string } {
+  if (!target) return { subdomain: "" };
+  const [subdomain, ...rest] = target.split("#");
+  const pageTitle = rest.length > 0 ? rest.join("#").trim() : undefined;
+  return {
+    subdomain: (subdomain || "").trim(),
+    pageTitle: pageTitle || undefined,
+  };
+}
+
+/**
+ * Build Fandom wiki API URL for a given wiki subdomain or target.
+ * Strips any `#pageTitle` so it queries the base endpoint,
  * e.g., "solo-leveling" → "https://solo-leveling.fandom.com/api.php"
+ *       "webtoon#PIGPEN" → "https://webtoon.fandom.com/api.php"
  */
 function apiUrl(wikiSubdomain: string): string {
-  return `https://${wikiSubdomain}.fandom.com${FANDOM_API_PATH}`;
+  const { subdomain } = parseWikiTarget(wikiSubdomain);
+  return `https://${subdomain}.fandom.com${FANDOM_API_PATH}`;
 }
 
 // Cache discovered Fandom subdomains to avoid repeated network checks
@@ -29,6 +46,23 @@ const KNOWN_WIKI_SUBDOMAINS: Record<string, string> = {
   "i killed the player of the academy": "i-killed-the-player-of-the-academy",
   "the beginning after the end": "tbate",
   "omniscient readers viewpoint": "orv",
+  "fff-class trashero": "fffclass-trashero",
+  "fff class trashero": "fffclass-trashero",
+  "fffclass trashero": "fffclass-trashero",
+  "the perks of being an s-class heroine": "the-perks-of-being-an-sclass-heroine",
+  "the perks of being an s class heroine": "the-perks-of-being-an-sclass-heroine",
+  "the perks of being an sclass heroine": "the-perks-of-being-an-sclass-heroine",
+  "a transmigrators privilege": "the-perks-of-being-an-sclass-heroine",
+  "father unrivaled": "peerless-dad",
+  "peerless dad": "peerless-dad",
+  "the tutorial is too tough": "the-tutorial-is-too-hard",
+  "the tutorial is too hard": "the-tutorial-is-too-hard",
+  "descent of the demon master": "the-descent-of-the-demonic-master",
+  "the descent of the demonic master": "the-descent-of-the-demonic-master",
+  "pigpen": "webtoon#PIGPEN",
+  "god of blackfield": "vsbattles#God_of_Blackfield",
+  "legend of an asura the poison dragon": "asurascans#Legend_of_Asura_–_The_Venom_Dragon",
+  "legend of asura the venom dragon": "asurascans#Legend_of_Asura_–_The_Venom_Dragon",
 };
 
 /**
@@ -60,6 +94,92 @@ async function findWikiFromHub(seriesTitle: string, synonyms: string[] = []): Pr
   return null;
 }
 
+const HUB_WIKIS = ["webtoon", "vsbattles", "asurascans", "koreanwebtoons"] as const;
+
+/**
+ * Probes multi-series hub wikis using OpenSearch to find pages for series
+ * without dedicated wikis (e.g. webtoon#PIGPEN, vsbattles#God_of_Blackfield).
+ */
+export async function probeHubWikis(
+  seriesTitle: string,
+  synonyms: string[] = []
+): Promise<string | null> {
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const titles = [seriesTitle, ...synonyms].filter(Boolean);
+
+  for (const hub of HUB_WIKIS) {
+    for (const t of titles) {
+      if (!t || t.length < 3) continue;
+      // Skip non-Latin scripts
+      if (/^[\p{Script=Han}\p{Script=Hangul}\p{Script=Katakana}\p{Script=Hiragana}\p{Script=Thai}]/u.test(t)) continue;
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+        const url = `https://${hub}.fandom.com/api.php?action=opensearch&search=${encodeURIComponent(t)}&limit=5&format=json`;
+        const res = await fetch(url, {
+          headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!res.ok) continue;
+
+        const [, matches] = (await res.json()) as [string, string[]];
+        if (!Array.isArray(matches) || matches.length === 0) continue;
+
+        const normTarget = normalize(t);
+        for (const match of matches) {
+          const normM = normalize(match);
+          if (
+            normM === normTarget ||
+            (normTarget.length >= 6 && normM.includes(normTarget)) ||
+            (normM.length >= 6 && normTarget.includes(normM))
+          ) {
+            return `${hub}#${match.replace(/\s+/g, "_")}`;
+          }
+        }
+      } catch {
+        // continue to next hub or title
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolves static CDN URL for a File:... media title on a Fandom wiki.
+ */
+export async function resolveWikiFileUrl(
+  wikiSubdomain: string,
+  fileTitle: string
+): Promise<string | null> {
+  const { subdomain } = parseWikiTarget(wikiSubdomain);
+  if (!subdomain || !fileTitle) return null;
+  const normalizedFile = fileTitle.startsWith("File:") ? fileTitle : `File:${fileTitle}`;
+  try {
+    const params = new URLSearchParams({
+      action: "query",
+      titles: normalizedFile,
+      prop: "imageinfo",
+      iiprop: "url",
+      format: "json",
+    });
+    const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
+      headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const firstPage = Object.values(data.query?.pages || {})[0] as
+      | { imageinfo?: Array<{ url?: string }> }
+      | undefined;
+    const url = firstPage?.imageinfo?.[0]?.url;
+    return typeof url === "string" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Dynamically discover or verify the Fandom wiki subdomain for a series title and its synonyms.
  * Probes candidate MediaWiki endpoints via siteinfo without any hardcoding.
@@ -74,14 +194,17 @@ export async function resolveFandomWikiSubdomain(
   }
 
   // 1. Check known mappings first
-  const normalizedKey = seriesTitle.toLowerCase().replace(/['’]/g, "").trim();
+  const toLookupKey = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+
+  const normalizedKey = toLookupKey(seriesTitle);
   if (KNOWN_WIKI_SUBDOMAINS[normalizedKey]) {
     const res = KNOWN_WIKI_SUBDOMAINS[normalizedKey];
     wikiSubdomainCache.set(cacheKey, res);
     return res;
   }
   for (const syn of synonyms) {
-    const synKey = (syn || "").toLowerCase().replace(/['’]/g, "").trim();
+    const synKey = toLookupKey(syn || "");
     if (KNOWN_WIKI_SUBDOMAINS[synKey]) {
       const res = KNOWN_WIKI_SUBDOMAINS[synKey];
       wikiSubdomainCache.set(cacheKey, res);
@@ -165,6 +288,17 @@ export async function resolveFandomWikiSubdomain(
     }
   }
 
+  // Class/rank transformations (e.g. fff-class -> fffclass, s-class -> sclass)
+  const classPatterns: [RegExp, string][] = [
+    [/([a-z0-9]+)-(class|rank|grade|tier|level)/gi, "$1$2"],
+    [/([a-z0-9]+)(class|rank|grade|tier|level)/gi, "$1-$2"],
+  ];
+  for (const [pat, rep] of classPatterns) {
+    if (pat.test(baseSlug)) {
+      candidates.push(baseSlug.replace(pat, rep));
+    }
+  }
+
   // Synonyms candidates
   for (const syn of synonyms) {
     if (!syn || typeof syn !== "string") continue;
@@ -190,6 +324,11 @@ export async function resolveFandomWikiSubdomain(
       }
     }
     for (const [pat, rep] of slugSwaps) {
+      if (pat.test(synSlug)) {
+        candidates.push(synSlug.replace(pat, rep));
+      }
+    }
+    for (const [pat, rep] of classPatterns) {
       if (pat.test(synSlug)) {
         candidates.push(synSlug.replace(pat, rep));
       }
@@ -269,6 +408,13 @@ export async function resolveFandomWikiSubdomain(
     return hubResult;
   }
 
+  // 3. Multi-series hub wiki fallback (e.g. webtoon#PIGPEN, vsbattles#God_of_Blackfield)
+  const hubProbe = await probeHubWikis(seriesTitle, synonyms);
+  if (hubProbe) {
+    wikiSubdomainCache.set(cacheKey, hubProbe);
+    return hubProbe;
+  }
+
   wikiSubdomainCache.set(cacheKey, null);
   return null;
 }
@@ -286,6 +432,9 @@ export async function fetchCharacterImage(
   const cached = cacheGet<string | null>(cacheKey);
   if (cached !== null) return cached;
 
+  const { subdomain, pageTitle } = parseWikiTarget(wikiSubdomain);
+  if (!subdomain) return null;
+
   const candidateNames = Array.from(new Set([name, ...aliases].filter(Boolean)));
 
   // 1. Direct pageimages query with redirects=1
@@ -301,7 +450,7 @@ export async function fetchCharacterImage(
         format: "json",
       });
 
-      const res = await fetch(`${apiUrl(wikiSubdomain)}?${params}`, {
+      const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
         headers: { "User-Agent": "SpoilerFreeMap/1.0" },
       });
       if (!res.ok) continue;
@@ -322,41 +471,47 @@ export async function fetchCharacterImage(
     }
   }
 
-  // 2. OpenSearch search for page title then query pageimages
-  for (const cand of candidateNames.slice(0, 3)) {
-    try {
-      const titles = await searchPages(wikiSubdomain, cand, 3);
-      for (const title of titles) {
-        if (title.includes("/") || title.includes(":")) continue; // avoid subpages or category pages
-        const params = new URLSearchParams({
-          action: "query",
-          titles: title,
-          redirects: "1",
-          prop: "pageimages",
-          piprop: "original|thumbnail",
-          pithumbsize: "600",
-          format: "json",
-        });
+  // 2. OpenSearch search for page title then query pageimages (only on dedicated wikis to avoid cross-series pollution on hubs)
+  if (!pageTitle) {
+    for (const cand of candidateNames.slice(0, 3)) {
+      try {
+        const titles = await searchPages(subdomain, cand, 3);
+        const normCand = cand.toLowerCase().replace(/[^a-z0-9]/g, "");
+        for (const title of titles) {
+          if (title.includes("/") || title.includes(":")) continue; // avoid subpages or category pages
+          const normTitle = title.toLowerCase().replace(/[^a-z0-9]/g, "");
+          if (!normTitle.includes(normCand) && !normCand.includes(normTitle)) continue;
 
-        const res = await fetch(`${apiUrl(wikiSubdomain)}?${params}`, {
-          headers: { "User-Agent": "SpoilerFreeMap/1.0" },
-        });
-        if (!res.ok) continue;
+          const params = new URLSearchParams({
+            action: "query",
+            titles: title,
+            redirects: "1",
+            prop: "pageimages",
+            piprop: "original|thumbnail",
+            pithumbsize: "600",
+            format: "json",
+          });
 
-        const json = await res.json();
-        const pages = json.query?.pages || {};
-        for (const pageId of Object.keys(pages)) {
-          if (pageId === "-1") continue;
-          const p = pages[pageId];
-          const src = p.original?.source || p.thumbnail?.source;
-          if (src && !src.includes("default") && !src.includes("placeholder")) {
-            cacheSet(cacheKey, src, FANDOM_CACHE_TTL);
-            return src;
+          const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
+            headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+          });
+          if (!res.ok) continue;
+
+          const json = await res.json();
+          const pages = json.query?.pages || {};
+          for (const pageId of Object.keys(pages)) {
+            if (pageId === "-1") continue;
+            const p = pages[pageId];
+            const src = p.original?.source || p.thumbnail?.source;
+            if (src && !src.includes("default") && !src.includes("placeholder")) {
+              cacheSet(cacheKey, src, FANDOM_CACHE_TTL);
+              return src;
+            }
           }
         }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
   }
 
@@ -390,7 +545,20 @@ export async function fetchWikitext(
   }
   if (!res.ok) return null;
 
-  let json: any;
+  let json: {
+    query?: {
+      pages?: Array<{
+        missing?: boolean;
+        revisions?: Array<{
+          slots?: {
+            main?: {
+              content?: string;
+            };
+          };
+        }>;
+      }>;
+    };
+  };
   try {
     json = await res.json();
   } catch {
@@ -573,7 +741,34 @@ export async function fetchCharacterWikitextSmart(
     }
   }
 
-  if (!foundTitle || !mainText) return null;
+  if (!foundTitle || !mainText) {
+    const { subdomain, pageTitle } = parseWikiTarget(wikiSubdomain);
+    if (pageTitle) {
+      try {
+        const hubWt = await fetchWikitext(subdomain, pageTitle);
+        if (hubWt) {
+          const namesToTry = [name, ...aliases].filter(Boolean);
+          for (const n of namesToTry) {
+            const esc = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const sectionRegex = new RegExp(
+              `={2,4}\\s*${esc}\\s*={2,4}\\s*\\n([\\s\\S]*?)(?=(?:\\n={2,4}[^=]+={2,4})|$)`,
+              "i"
+            );
+            const match = hubWt.match(sectionRegex);
+            if (match && match[1]?.trim()) {
+              return {
+                title: `${pageTitle}#${n}`,
+                wikitext: match[1].trim(),
+              };
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }
 
   // 5. Check for dedicated /Relationships or /Relationship subpages
   try {
@@ -598,57 +793,6 @@ export interface FandomCharacterSummary {
   imageUrl: string;
 }
 
-/**
- * Discovers character list directly from Fandom Wiki Category:Characters with live portraits.
- */
-export async function fetchFandomCategoryCharacters(
-  wikiSubdomain: string,
-  limit = 25
-): Promise<FandomCharacterSummary[]> {
-  const cacheKey = `fandom:category:${wikiSubdomain}:${limit}`;
-  const cached = cacheGet<FandomCharacterSummary[]>(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const params = new URLSearchParams({
-      action: "query",
-      generator: "categorymembers",
-      gcmtitle: "Category:Characters",
-      gcmlimit: String(limit),
-      gcmnamespace: "0",
-      prop: "pageimages",
-      piprop: "original|thumbnail",
-      pithumbsize: "600",
-      format: "json",
-    });
-
-    const res = await fetch(`${apiUrl(wikiSubdomain)}?${params}`);
-    if (!res.ok) return [];
-
-    const data = await res.json();
-    const pages = data.query?.pages || {};
-    const results: FandomCharacterSummary[] = [];
-
-    for (const pageId of Object.keys(pages)) {
-      const page = pages[pageId];
-      if (!page || !page.title) continue;
-      const title = page.title.trim();
-      if (title.toLowerCase().includes("category:") || title.toLowerCase().includes("list of")) continue;
-
-      const img = page.thumbnail?.source || page.original?.source || "";
-      results.push({
-        name: title,
-        imageUrl: img,
-      });
-    }
-
-    cacheSet(cacheKey, results, FANDOM_CACHE_TTL);
-    return results;
-  } catch {
-    return [];
-  }
-}
-
 // ── Subpage / non-character title patterns to filter out ─────────────
 const SKIP_TITLE_PATTERNS = [
   /\bcategory:/i,
@@ -669,6 +813,197 @@ function isCharacterTitle(title: string): boolean {
 }
 
 /**
+ * Extracts character names and images from multi-series hub wikitext pages.
+ * Handles <gallery> links, Level 3/4 subsections, bullet lists, and synopsis mentions.
+ */
+export function extractCharactersFromWikitext(
+  wikitext: string
+): Array<{ name: string; imageUrl?: string }> {
+  const characters: Array<{ name: string; imageUrl?: string }> = [];
+  const seen = new Set<string>();
+
+  function add(name: string, img = "") {
+    if (!name) return;
+    const clean = name.replace(/['\[\]]/g, "").trim();
+    if (!clean || clean.length < 2 || clean.length > 60) return;
+    const lower = clean.toLowerCase();
+    const skip = [
+      "characters", "main characters", "supporting characters", "minor characters",
+      "villains", "antagonists", "summary", "synopsis", "episodes", "navigation",
+      "external links", "references", "trivia", "gallery", "powers and abilities",
+      "soldiers", "see also", "icon", "banner", "logo", "plot", "series", "notes",
+      "overview", "story", "status", "webtoon", "manhwa", "manga", "novel", "author", "artist"
+    ];
+    if (skip.includes(lower)) return;
+    if (seen.has(lower)) return;
+    seen.add(lower);
+    characters.push({ name: clean, imageUrl: img });
+  }
+
+  // 1. Character section isolation (stop at next == Section ==)
+  const charSectionMatch = wikitext.match(
+    /(?:^|\n)==\s*(?:Main\s+|Supporting\s+|Key\s+)?Characters?\s*==\s*\n([\s\S]*?)(?=(?:\n==(?!=)\s*[^=\n]+?\s*==)|$)/i
+  );
+  const sec = charSectionMatch ? charSectionMatch[1] : "";
+
+  if (sec) {
+    // Gallery links inside character section
+    const galleryRegex = /<gallery[^>]*>([\s\S]*?)<\/gallery>/gi;
+    let gMatch: RegExpExecArray | null;
+    while ((gMatch = galleryRegex.exec(sec)) !== null) {
+      const lines = gMatch[1].split("\n");
+      for (const line of lines) {
+        const parts = line.split("|").map((p) => p.trim());
+        if (parts.length >= 2) {
+          let charName = "";
+          for (let i = 1; i < parts.length; i++) {
+            const p = parts[i];
+            if (p.startsWith("link=")) {
+              charName = p.replace("link=", "").trim();
+              break;
+            } else if (p.startsWith("'''") || (!charName && !p.includes("="))) {
+              charName = p.replace(/['\[\]]/g, "").trim();
+            }
+          }
+          if (charName) add(charName);
+        }
+      }
+    }
+
+    // Subheadings === Name === or ==== Name ====
+    const hRegex = /={3,4}\s*([^=\n]+?)\s*={3,4}/g;
+    let h: RegExpExecArray | null;
+    while ((h = hRegex.exec(sec)) !== null) {
+      add(h[1]);
+    }
+
+    // Bullet points * [[Name]] or * '''Name''' or * Name:
+    const bulletRegex = /\*\s*(?:\[\[(?:[^|\]]+\|)?([^\]]+)\]\]|'''([^']+)'''|([^\n:–—]+)[:–—])/g;
+    let b: RegExpExecArray | null;
+    while ((b = bulletRegex.exec(sec)) !== null) {
+      const name = b[1] || b[2] || b[3];
+      add(name);
+    }
+  } else {
+    // If no character section, check for protagonist / hero mentions in synopsis
+    const protoMatch = wikitext.match(
+      /(?:sole survivor|protagonist|main character|hero|awakens)[^–—\n]*?[,:–—]\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/
+    );
+    if (protoMatch && protoMatch[1]) {
+      add(protoMatch[1]);
+    }
+  }
+
+  // Infobox image association if protagonist has no image
+  const infoboxImgMatch = wikitext.match(/\|image\d*\s*=\s*([^|\n<>]+\.(?:jpg|jpeg|png|webp))/i);
+  if (infoboxImgMatch && characters.length > 0 && !characters[0].imageUrl) {
+    characters[0].imageUrl = "File:" + infoboxImgMatch[1].trim();
+  }
+
+  return characters;
+}
+
+/**
+ * Discovers character list from a multi-series hub wiki page and its sub-categories.
+ */
+async function fetchHubWikiCharacters(
+  subdomain: string,
+  pageTitle: string,
+  maxResults = 500
+): Promise<FandomCharacterSummary[]> {
+  const results: FandomCharacterSummary[] = [];
+  const seen = new Set<string>();
+
+  function add(name: string, imageUrl = "") {
+    if (!name) return;
+    const clean = name.replace(/['\[\]]/g, "").trim();
+    if (!isCharacterTitle(clean)) return;
+    const lower = clean.toLowerCase();
+    if (seen.has(lower)) return;
+    seen.add(lower);
+    results.push({ name: clean, imageUrl });
+  }
+
+  const cleanTitle = pageTitle.replace(/_/g, " ");
+  const categoryCandidates = [
+    `Category:${pageTitle}`,
+    `Category:${cleanTitle}`,
+    `Category:${pageTitle}_Characters`,
+    `Category:${cleanTitle} Characters`,
+  ];
+
+  for (const cat of categoryCandidates) {
+    try {
+      const params = new URLSearchParams({
+        action: "query",
+        generator: "categorymembers",
+        gcmtitle: cat,
+        gcmlimit: "50",
+        gcmnamespace: "0",
+        prop: "pageimages",
+        piprop: "original|thumbnail",
+        pithumbsize: "600",
+        format: "json",
+      });
+      const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
+        headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const pages = data.query?.pages || {};
+        for (const pageId of Object.keys(pages)) {
+          const p = pages[pageId];
+          if (!p?.title) continue;
+          const title = p.title.trim();
+          if (!isCharacterTitle(title)) continue;
+          if (
+            title.toLowerCase() === cleanTitle.toLowerCase() ||
+            title.toLowerCase() === pageTitle.toLowerCase()
+          ) {
+            continue;
+          }
+          const img = p.thumbnail?.source || p.original?.source || "";
+          add(title, img);
+        }
+      }
+    } catch {}
+  }
+
+  try {
+    const wt = await fetchWikitext(subdomain, pageTitle);
+    if (wt) {
+      const extracted = extractCharactersFromWikitext(wt);
+      for (const c of extracted) {
+        add(c.name, c.imageUrl);
+      }
+    }
+  } catch {}
+
+  // Resolve images for extracted characters
+  for (const c of results) {
+    if (c.imageUrl && c.imageUrl.startsWith("File:")) {
+      const direct = await resolveWikiFileUrl(subdomain, c.imageUrl);
+      if (direct) c.imageUrl = direct;
+    } else if (!c.imageUrl) {
+      const img = await fetchCharacterImage(`${subdomain}#${pageTitle}`, c.name);
+      if (img) c.imageUrl = img;
+    }
+  }
+
+  return results.slice(0, maxResults);
+}
+
+/**
+ * Discovers character list directly from Fandom Wiki Category:Characters with live portraits.
+ */
+export async function fetchFandomCategoryCharacters(
+  wikiSubdomain: string,
+  limit = 25
+): Promise<FandomCharacterSummary[]> {
+  return fetchFandomCategoryCharactersPaginated(wikiSubdomain, limit);
+}
+
+/**
  * Fully-paginated Fandom category member fetch with fallback categories.
  * Loops via gcmcontinue until all pages are retrieved, filters subpages/non-characters.
  */
@@ -680,7 +1015,19 @@ export async function fetchFandomCategoryCharactersPaginated(
   const cached = cacheGet<FandomCharacterSummary[]>(cacheKey);
   if (cached) return cached;
 
-  // Fallback category titles wiki authors commonly use
+  const { subdomain, pageTitle } = parseWikiTarget(wikiSubdomain);
+  if (!subdomain) return [];
+
+  // Hub wiki mode: extract from series categories and wikitext
+  if (pageTitle) {
+    const hubResults = await fetchHubWikiCharacters(subdomain, pageTitle, maxResults);
+    if (hubResults.length > 0) {
+      cacheSet(cacheKey, hubResults, FANDOM_CACHE_TTL);
+      return hubResults;
+    }
+  }
+
+  // Dedicated wiki mode
   const categoryTitles = [
     "Category:Characters",
     "Category:Character",
@@ -707,7 +1054,7 @@ export async function fetchFandomCategoryCharactersPaginated(
         });
         if (gcmcontinue) params.set("gcmcontinue", gcmcontinue);
 
-        const res = await fetch(`${apiUrl(wikiSubdomain)}?${params}`);
+        const res = await fetch(`${apiUrl(subdomain)}?${params}`);
         if (!res.ok) break;
 
         const data = await res.json();

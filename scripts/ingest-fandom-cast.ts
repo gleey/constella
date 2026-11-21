@@ -10,7 +10,8 @@
 
 import { prisma } from "../src/lib/prisma";
 import { fetchFandomCategoryCharactersPaginated } from "../src/lib/fandom";
-import { normalizeName } from "../src/lib/name-dedupe";
+import { canonicalizeName, shouldMergeCharacters } from "../src/lib/name-dedupe";
+import { isBrokenImageUrl } from "../src/lib/auto-sync";
 import { buildSeriesConfigs } from "./series-config";
 
 async function main() {
@@ -21,7 +22,7 @@ async function main() {
   const limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : 500;
   const dryRun = args.includes("--dry-run");
 
-  const configs = await buildSeriesConfigs();
+  const configs = await buildSeriesConfigs(targetId);
 
   for (const config of configs) {
     if (targetId && config.anilistId !== targetId) continue;
@@ -40,44 +41,81 @@ async function main() {
 
     const existing = await prisma.character.findMany({
       where: { mediaId: config.mediaId },
-      select: { name: true, aliases: true, imageUrl: true },
+      select: { id: true, name: true, aliases: true, imageUrl: true },
     });
-    const existingKeys = new Set<string>();
-    for (const c of existing) {
-      existingKeys.add(normalizeName(c.name));
-      for (const a of c.aliases) existingKeys.add(normalizeName(a));
-    }
 
     let created = 0;
+    let updatedImg = 0;
     let skipped = 0;
     for (const person of cast) {
       if (!person?.name || !person.name.trim()) continue;
-      const key = normalizeName(person.name);
-      if (existingKeys.has(key)) {
+      const cleanName = person.name.trim();
+
+      const existingChar = existing.find(
+        (c) =>
+          c.name.toLowerCase() === cleanName.toLowerCase() ||
+          canonicalizeName(c.name) === canonicalizeName(cleanName) ||
+          shouldMergeCharacters(c.name, cleanName) !== null ||
+          c.aliases.some(
+            (a) =>
+              a.toLowerCase() === cleanName.toLowerCase() ||
+              canonicalizeName(a) === canonicalizeName(cleanName) ||
+              shouldMergeCharacters(a, cleanName) !== null
+          )
+      );
+
+      if (existingChar) {
+        let changed = false;
+        const updates: { imageUrl?: string; aliases?: string[] } = {};
+
+        if (person.imageUrl && isBrokenImageUrl(existingChar.imageUrl)) {
+          updates.imageUrl = person.imageUrl;
+          existingChar.imageUrl = person.imageUrl;
+          changed = true;
+          updatedImg++;
+        }
+
+        if (cleanName !== existingChar.name && !existingChar.aliases.includes(cleanName)) {
+          updates.aliases = Array.from(new Set([...existingChar.aliases, cleanName]));
+          existingChar.aliases = updates.aliases;
+          changed = true;
+        }
+
+        if (changed && !dryRun) {
+          await prisma.character.update({
+            where: { id: existingChar.id },
+            data: updates,
+          });
+        }
         skipped++;
         continue;
       }
-      existingKeys.add(key); // juga mencegah duplikat antar kategori dalam batch ini
 
       if (dryRun) {
-        console.log(`  [DRY] Akan menambah: ${person.name}`);
+        console.log(`  [DRY] Akan menambah: ${cleanName}`);
         created++;
         continue;
       }
 
-      await prisma.character.create({
+      const createdChar = await prisma.character.create({
         data: {
           mediaId: config.mediaId,
-          name: person.name.trim(),
+          name: cleanName,
           aliases: [],
           imageUrl: person.imageUrl || "",
           // aman: chapter 1 = muncul sejak awal, tidak membocorkan timeline
           introducedAtChapter: 1,
         },
       });
+      existing.push({
+        id: createdChar.id,
+        name: createdChar.name,
+        aliases: createdChar.aliases,
+        imageUrl: createdChar.imageUrl,
+      });
       created++;
     }
-    console.log(`[DB] ${config.title}: +${created} karakter baru, ${skipped} sudah ada.`);
+    console.log(`[DB] ${config.title}: +${created} karakter baru, ${updatedImg} gambar diperbarui, ${skipped} sudah ada.`);
   }
 
   console.log("\nSelesai. Untuk lore (deskripsi/status/faksi/relasi), jalankan enrich-all.ts.");
