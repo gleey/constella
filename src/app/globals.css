@@ -75,14 +75,6 @@ body {
 .animate-slide-in-right {
   animation: slideInRight 0.3s ease-out;
 }
-@keyframes dropdownIn {
-  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-.animate-dropdown-in {
-  animation: dropdownIn 0.15s ease-out;
-}
-
 /* ── Modern design layer ─────────────────────────────────────────────── */
 
 /* Aurora backdrop: subtle layered radial glows on the dark base */

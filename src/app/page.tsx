@@ -244,7 +244,7 @@ function FilterDropdown({
       </button>
 
       {open && (
-        <div className="absolute z-[60] mt-1.5 left-0 min-w-full rounded-xl border border-white/10 bg-[#131b2e]/95 backdrop-blur-xl shadow-xl shadow-black/40 overflow-hidden animate-dropdown-in">
+        <div className="absolute z-[60] mt-1.5 left-0 min-w-full rounded-xl border border-white/10 bg-[#131b2e]/95 backdrop-blur-xl shadow-xl shadow-black/40">
           {options.map((opt) => (
             <button
               key={opt.value}
