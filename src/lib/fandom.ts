@@ -20,6 +20,46 @@ function apiUrl(wikiSubdomain: string): string {
 // Cache discovered Fandom subdomains to avoid repeated network checks
 const wikiSubdomainCache = new Map<string, string | null>();
 
+// Curated mappings for unconventional fandom subdomains that cannot be deduced from standard rules
+const KNOWN_WIKI_SUBDOMAINS: Record<string, string> = {
+  "the frozen player returns": "rfp",
+  "return of the frozen player": "rfp",
+  "i killed the main player": "i-killed-the-player-of-the-academy",
+  "i killed an academy player": "i-killed-the-player-of-the-academy",
+  "i killed the player of the academy": "i-killed-the-player-of-the-academy",
+  "the beginning after the end": "tbate",
+  "omniscient readers viewpoint": "orv",
+};
+
+/**
+ * Queries collective fandom hubs like koreanwebtoons.fandom.com to discover
+ * dedicated wiki subdomains via |wiki=subdomain or [[w:c:subdomain:...]] tags.
+ */
+async function findWikiFromHub(seriesTitle: string, synonyms: string[] = []): Promise<string | null> {
+  const titles = [seriesTitle, ...synonyms];
+  for (const t of titles) {
+    if (!t || typeof t !== "string") continue;
+    // Skip non-Latin scripts
+    if (/^[\p{Script=Han}\p{Script=Hangul}\p{Script=Katakana}\p{Script=Hiragana}\p{Script=Thai}]/u.test(t)) continue;
+    try {
+      const pageName = t.trim().replace(/\s+/g, "_");
+      const wt = await fetchWikitext("koreanwebtoons", pageName);
+      if (wt) {
+        const wikiMatch = wt.match(/\|wiki\s*=\s*([a-zA-Z0-9-]+)/i);
+        if (wikiMatch?.[1] && wikiMatch[1].trim().length > 1) {
+          return wikiMatch[1].trim().toLowerCase();
+        }
+
+        const interMatch = wt.match(/\[\[w:c:([a-zA-Z0-9-]+):/i);
+        if (interMatch?.[1] && interMatch[1].trim().length > 1) {
+          return interMatch[1].trim().toLowerCase();
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
 /**
  * Dynamically discover or verify the Fandom wiki subdomain for a series title and its synonyms.
  * Probes candidate MediaWiki endpoints via siteinfo without any hardcoding.
@@ -31,6 +71,22 @@ export async function resolveFandomWikiSubdomain(
   const cacheKey = seriesTitle.toLowerCase().trim();
   if (wikiSubdomainCache.has(cacheKey)) {
     return wikiSubdomainCache.get(cacheKey) ?? null;
+  }
+
+  // 1. Check known mappings first
+  const normalizedKey = seriesTitle.toLowerCase().replace(/['’]/g, "").trim();
+  if (KNOWN_WIKI_SUBDOMAINS[normalizedKey]) {
+    const res = KNOWN_WIKI_SUBDOMAINS[normalizedKey];
+    wikiSubdomainCache.set(cacheKey, res);
+    return res;
+  }
+  for (const syn of synonyms) {
+    const synKey = (syn || "").toLowerCase().replace(/['’]/g, "").trim();
+    if (KNOWN_WIKI_SUBDOMAINS[synKey]) {
+      const res = KNOWN_WIKI_SUBDOMAINS[synKey];
+      wikiSubdomainCache.set(cacheKey, res);
+      return res;
+    }
   }
 
   const cleanTitle = (raw: string) =>
@@ -96,6 +152,12 @@ export async function resolveFandomWikiSubdomain(
     [/isnt/, "isn-t"],
     [/isn-t/, "isnt"],
     [/swordmaster(?!s)/, "swordmasters"],
+    [/main-player/, "player-of-the-academy"],
+    [/player-of-the-academy/, "main-player"],
+    [/an-academy-player/, "the-player-of-the-academy"],
+    [/academy-player/, "player-of-the-academy"],
+    [/the-frozen-player-returns/, "return-of-the-frozen-player"],
+    [/frozen-player-returns/, "return-of-the-frozen-player"],
   ];
   for (const [pat, rep] of slugSwaps) {
     if (pat.test(baseSlug)) {
@@ -117,6 +179,10 @@ export async function resolveFandomWikiSubdomain(
     const synWords = cSyn.split(/\s+/).filter(Boolean);
     if (synWords.length > 1) {
       candidates.push(synWords.map((w) => w[0]?.toLowerCase()).join(""));
+    }
+    const synNonStopWords = synWords.filter((w) => !["the", "of", "a", "an", "and"].includes(w.toLowerCase()));
+    if (synNonStopWords.length > 1) {
+      candidates.push(synNonStopWords.map((w) => w[0]?.toLowerCase()).join(""));
     }
     for (const p of prefixes) {
       if (p.test(synSlug)) {
@@ -194,6 +260,13 @@ export async function resolveFandomWikiSubdomain(
   if (bestCand) {
     wikiSubdomainCache.set(cacheKey, bestCand);
     return bestCand;
+  }
+
+  // 2. Hub wiki fallback (e.g. koreanwebtoons.fandom.com)
+  const hubResult = await findWikiFromHub(seriesTitle, synonyms);
+  if (hubResult) {
+    wikiSubdomainCache.set(cacheKey, hubResult);
+    return hubResult;
   }
 
   wikiSubdomainCache.set(cacheKey, null);
@@ -301,6 +374,7 @@ export async function fetchWikitext(
   const params = new URLSearchParams({
     action: "query",
     titles: pageTitle,
+    redirects: "1",
     prop: "revisions",
     rvprop: "content",
     rvslots: "main",
@@ -325,7 +399,19 @@ export async function fetchWikitext(
   const page = json.query?.pages?.[0];
   if (!page || page.missing) return null;
 
-  return page.revisions?.[0]?.slots?.main?.content ?? null;
+  const content = page.revisions?.[0]?.slots?.main?.content ?? null;
+  if (!content) return null;
+
+  // If content still contains a raw redirect (e.g. double redirect or custom format), follow it
+  const redirectMatch = content.match(/^#REDIRECT\s*\[\[([^\]]+)\]\]/i);
+  if (redirectMatch?.[1]) {
+    const targetTitle = redirectMatch[1].trim();
+    if (targetTitle !== pageTitle) {
+      return fetchWikitext(wikiSubdomain, targetTitle);
+    }
+  }
+
+  return content;
 }
 
 /**
@@ -366,13 +452,16 @@ export async function searchPages(
  * (Synopsis, History, Relationships, Background) under 5500 chars to avoid 503 spikes.
  */
 export function cleanWikitextForLLM(wikitext: string, maxChars = 5500): string {
+  // Extract high-value relationship blocks or infobox fields before stripping
+  const relBlock = wikitext.match(/(?:<!--\s*Relationships\s*-->|==+\s*(?:Relationships?|Connections?)\s*==+)[\s\S]*?(?=(?:<!--|==+|\}\}))/i);
+  const infoRelMatches = wikitext.match(/\|(?:relatives?|friends?|allies|enemies?|lover|spouse|family|affiliations?|partner|master|disciple)\s*=[^|}]+/gi);
+
   // 1. Strip comments, ref tags, image embeds
   let text = wikitext
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<ref[\s\S]*?<\/ref>/gi, "")
     .replace(/<ref[^>]*\/>/gi, "")
-    .replace(/\[\[(?:File|Image|Category):[^\]]*\]\]/gi, "")
-    .replace(/\{\{[^}]*\}\}/g, ""); // strip infobox / navbox templates
+    .replace(/\[\[(?:File|Image|Category):[^\]]*\]\]/gi, "");
 
   // 2. Look for high-signal sections: Relationships, History, Biography, Overview
   const relMatch = text.match(/==+\s*(?:Relationships?|Connections?)\s*==+[\s\S]*?(?===+|$)/i);
@@ -380,11 +469,13 @@ export function cleanWikitextForLLM(wikitext: string, maxChars = 5500): string {
   const bgMatch = text.match(/==+\s*(?:Background|Overview|Personality|Appearance)\s*==+[\s\S]*?(?===+|$)/i);
 
   let highSignal = "";
+  if (relBlock) highSignal += `\n== Infobox Relationships ==\n${relBlock[0]}\n`;
+  else if (infoRelMatches) highSignal += `\n== Infobox Relationships ==\n${infoRelMatches.join("\n")}\n`;
   if (relMatch) highSignal += `\n${relMatch[0]}\n`;
   if (histMatch) highSignal += `\n${histMatch[0].slice(0, 3000)}\n`;
   if (bgMatch) highSignal += `\n${bgMatch[0].slice(0, 1500)}\n`;
 
-  if (highSignal.trim().length > 400) {
+  if (highSignal.trim().length > 250) {
     text = highSignal;
   }
 
@@ -495,7 +586,7 @@ export async function fetchCharacterWikitextSmart(
         mainText += `\n\n== Dedicated Relationships Subpage ==\n${relText2}`;
       }
     }
-  } catch (err) {
+  } catch {
     // Non-fatal, keep mainText
   }
 

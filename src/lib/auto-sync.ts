@@ -8,7 +8,7 @@ import { prisma } from "./prisma";
 import { fetchPopularMedia, fetchMediaDetail, type CharacterDetail } from "./anilist";
 import { resolveFandomWikiSubdomain, fetchCharacterImage, fetchFandomCategoryCharacters } from "./fandom";
 import { resolveCharacterName } from "./name-resolution";
-import { normalizeName } from "./name-dedupe";
+import { normalizeName, shouldMergeCharacters, canonicalizeName } from "./name-dedupe";
 import { fetchLiveMangaInfo } from "./live-chapters";
 
 export interface SyncResultItem {
@@ -55,7 +55,7 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
       const detail = await fetchMediaDetail(item.id);
 
       let resolvedChapters = detail.chapters && detail.chapters > 0 ? detail.chapters : 0;
-      let resolvedStatus = detail.status;
+      const resolvedStatus = detail.status;
 
       const live = await fetchLiveMangaInfo(detail.title);
       if (live) {
@@ -111,22 +111,43 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
       if (detail.characters && detail.characters.length > 0) {
         characterCandidates = detail.characters.map((c: CharacterDetail, idx: number) => ({
           name: normalizeName(c.name),
-          aliases: c.aliases,
+          aliases: [...(c.aliases || [])],
           imageUrl: c.imageUrl,
           introducedAtChapter: idx === 0 ? 1 : Math.min(10, detail.chapters || 1),
           role: c.role,
         }));
-      } else if (wikiSubdomain) {
-        // Fallback to Fandom Wiki Category:Characters
-        console.log(`[AutoSync] AniList characters empty for "${detail.title}". Querying Fandom Category:Characters...`);
-        const fandomChars = await fetchFandomCategoryCharacters(wikiSubdomain, 15);
-        characterCandidates = fandomChars.map((fc, idx) => ({
-          name: normalizeName(fc.name),
-          aliases: [],
-          imageUrl: fc.imageUrl,
-          introducedAtChapter: idx === 0 ? 1 : 1,
-          role: idx === 0 ? "MAIN" : "SUPPORTING",
-        }));
+      }
+
+      // Merge in additional cast members from Fandom Wiki if available
+      if (wikiSubdomain) {
+        try {
+          const fandomChars = await fetchFandomCategoryCharacters(wikiSubdomain, 30);
+          for (const fc of fandomChars) {
+            const matchIndex = characterCandidates.findIndex((c) =>
+              shouldMergeCharacters(c.name, fc.name) !== null ||
+              canonicalizeName(c.name) === canonicalizeName(fc.name)
+            );
+            if (matchIndex >= 0) {
+              const matched = characterCandidates[matchIndex];
+              if (isBrokenImageUrl(matched.imageUrl) && fc.imageUrl) {
+                matched.imageUrl = fc.imageUrl;
+              }
+              if (!matched.aliases.includes(fc.name)) {
+                matched.aliases.push(fc.name);
+              }
+            } else {
+              characterCandidates.push({
+                name: normalizeName(fc.name),
+                aliases: [],
+                imageUrl: fc.imageUrl,
+                introducedAtChapter: characterCandidates.length === 0 ? 1 : Math.min(15, detail.chapters || 1),
+                role: characterCandidates.length === 0 ? "MAIN" : "SUPPORTING",
+              });
+            }
+          }
+        } catch (e: any) {
+          console.warn(`[AutoSync] Could not fetch fandom characters for ${detail.title}: ${e.message}`);
+        }
       }
       characterCandidates = characterCandidates.filter((c) => c.name.length > 0);
 

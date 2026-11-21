@@ -16,13 +16,21 @@ import type { Character, Faction } from "@/generated/prisma/client";
  * e.g. "Dok-Ja Kim" -> "dokjakim", "Kim Dokja" -> "dokjakim"
  */
 function canonicalize(str: string): string {
-  return str.toLowerCase().replace(/[\s\-_'.]/g, "");
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\s\-_'’.\u2010-\u2015]/g, "");
 }
 
 function wordTokens(str: string): Set<string> {
   // Remove hyphens, apostrophes without adding spaces to join hyphenated names
   // e.g. "Joong-Hyuk Yoo" -> "joonghyuk yoo" -> ["joonghyuk", "yoo"]
-  const unhyphenated = str.toLowerCase().replace(/[\-']/g, "");
+  const unhyphenated = str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\-'’\u2010-\u2015]/g, "");
   const tokens = unhyphenated.split(/\s+/).filter(Boolean);
   return new Set(tokens);
 }

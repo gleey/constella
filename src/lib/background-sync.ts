@@ -22,7 +22,7 @@ import {
 } from "./fandom";
 import { parseCharacterWikitext, type GeminiParsedCharacter, normalizeGeminiOutput, getGeminiModels } from "./gemini";
 import { resolveCharacterName } from "./name-resolution";
-import { normalizeName, shouldMergeCharacters } from "./name-dedupe";
+import { normalizeName, shouldMergeCharacters, canonicalizeName } from "./name-dedupe";
 import { validateTemporalBounds } from "./temporal";
 import { isBrokenImageUrl } from "./auto-sync";
 import { GoogleGenAI } from "@google/genai";
@@ -178,16 +178,44 @@ async function runCatalogSync(targetAnilistId?: number) {
       }> = [];
 
       if (anilistDetail.characters && anilistDetail.characters.length > 0) {
-        charactersToSync = anilistDetail.characters;
-      } else if (wikiSubdomain) {
-        addLog(`AniList characters kosong. Mengambil dari Fandom Category:Characters...`);
-        const fandomChars = await fetchFandomCategoryCharacters(wikiSubdomain, 20);
-        charactersToSync = fandomChars.map((fc, i) => ({
-          name: fc.name,
-          aliases: [],
-          imageUrl: fc.imageUrl,
-          role: i === 0 ? "MAIN" : "SUPPORTING",
+        charactersToSync = anilistDetail.characters.map((c) => ({
+          ...c,
+          aliases: [...(c.aliases || [])],
         }));
+      }
+
+      // Merge in additional cast members from Fandom Wiki if available
+      if (wikiSubdomain) {
+        try {
+          const fandomChars = await fetchFandomCategoryCharacters(wikiSubdomain, 35);
+          if (fandomChars.length > 0) {
+            addLog(`Ditemukan ${fandomChars.length} karakter dari Fandom Category:Characters (${wikiSubdomain}).`);
+          }
+          for (const fc of fandomChars) {
+            const matchIndex = charactersToSync.findIndex((c) =>
+              shouldMergeCharacters(c.name, fc.name) !== null ||
+              canonicalizeName(c.name) === canonicalizeName(fc.name)
+            );
+            if (matchIndex >= 0) {
+              const matched = charactersToSync[matchIndex];
+              if (isBrokenImageUrl(matched.imageUrl) && fc.imageUrl) {
+                matched.imageUrl = fc.imageUrl;
+              }
+              if (!matched.aliases.includes(fc.name)) {
+                matched.aliases.push(fc.name);
+              }
+            } else {
+              charactersToSync.push({
+                name: fc.name,
+                aliases: [],
+                imageUrl: fc.imageUrl,
+                role: charactersToSync.length === 0 ? "MAIN" : "SUPPORTING",
+              });
+            }
+          }
+        } catch (e: any) {
+          addLog(`Gagal mengambil karakter Fandom: ${e.message}`);
+        }
       }
 
       // Normalize incoming names (collapse whitespace) so "Hades " etc.
@@ -476,18 +504,32 @@ REQUIREMENTS:
     const ai = new GoogleGenAI({ apiKey });
     for (const model of getGeminiModels()) {
       try {
-        const res = await ai.models.generateContent({
+        const timeoutMs = 8000;
+        const genPromise = ai.models.generateContent({
           model,
           contents: prompt,
           config: { temperature: 0.2 },
         });
+        const res = await Promise.race([
+          genPromise,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Gemini timeout (${timeoutMs}ms)`)), timeoutMs)
+          ),
+        ]);
         const text = (res.text ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
         const parsed = JSON.parse(text);
         return normalizeGeminiOutput(parsed, totalChapters);
       } catch (err: any) {
         console.warn(`[Gemini-Synth] Model ${model} gagal: ${err.message || String(err)}. Lanjut ke model berikut...`);
-        if (err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED")) {
-          await new Promise((r) => setTimeout(r, 2000));
+        if (
+          err?.message?.includes("429") ||
+          err?.message?.includes("RESOURCE_EXHAUSTED") ||
+          err?.message?.includes("Quota exceeded") ||
+          err?.message?.includes("timeout") ||
+          err?.message?.includes("ETIMEDOUT")
+        ) {
+          console.log(`[Gemini-Synth] Kuota habis / timeout pada Gemini. Beralih langsung ke Groq fallback...`);
+          break;
         }
       }
     }
@@ -575,9 +617,6 @@ async function runLoreSync(targetAnilistId?: number) {
       const dbCharacters = await prisma.character.findMany({ where: { mediaId: media.id } });
       const allNamesList = dbCharacters.map((c) => c.name);
 
-      // Prioritize MAIN characters (limit to 6 to control AI token cost)
-      const priorityChars = dbCharacters.slice(0, 6);
-
       // Skip serial/karakter yang sudah punya lore hasil ekstraksi AI.
       // Placeholder dari auto-sync ("X is a character featured in Y.") tidak dihitung.
       const syncedRows = await prisma.characterDescription.findMany({
@@ -589,7 +628,12 @@ async function runLoreSync(targetAnilistId?: number) {
         distinct: ["characterId"],
       });
       const syncedIds = new Set(syncedRows.map((d) => d.characterId));
-      const pendingChars = priorityChars.filter((c) => !syncedIds.has(c.id));
+
+      // Prioritize characters without AI lore (allow up to 15 for targeted sync, 6 for full sweep)
+      const maxCharsToSync = targetAnilistId ? 15 : 6;
+      const pendingChars = dbCharacters
+        .filter((c) => !syncedIds.has(c.id))
+        .slice(0, maxCharsToSync);
 
       if (pendingChars.length === 0) {
         addLog(`[SKIP] ${media.title} sudah memiliki lore AI untuk semua karakter prioritas — lewati (hemat token AI).`);
@@ -597,7 +641,7 @@ async function runLoreSync(targetAnilistId?: number) {
         globalState.progress = Math.round((globalState.completedSeries / globalState.totalSeries) * 100);
         continue;
       }
-      addLog(`[Lore Sync] ${media.title}: ${pendingChars.length}/${priorityChars.length} karakter perlu diekstrak.`);
+      addLog(`[Lore Sync] ${media.title}: ${pendingChars.length} karakter perlu diekstrak lore-nya.`);
 
       for (const dbChar of pendingChars) {
         globalState.currentCharacter = dbChar.name;

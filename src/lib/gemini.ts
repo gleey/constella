@@ -178,22 +178,43 @@ const GEMINI_CHARACTER_SCHEMA = {
   propertyOrdering: ["introducedAtChapter", "descriptions", "statuses", "relationships", "factions"],
 } as const;
 
+function parseChapterInt(val: any, fallback: number): number {
+  if (Number.isInteger(val)) return Math.max(1, val);
+  if (typeof val === "string") {
+    const m = val.match(/\d+/);
+    if (m) return Math.max(1, parseInt(m[0], 10));
+  }
+  return fallback;
+}
+
+function parseChapterIntOrNull(val: any): number | null {
+  if (Number.isInteger(val) && val > 0) return val;
+  if (typeof val === "string") {
+    const m = val.match(/\d+/);
+    if (m) {
+      const n = parseInt(m[0], 10);
+      return n > 0 ? n : null;
+    }
+  }
+  return null;
+}
+
 /**
  * Normalizes any schema variations returned by LLM into strict GeminiParsedCharacter format.
  */
 export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiParsedCharacter {
-  const introducedAtChapter = Math.max(
-    1,
-    Number.isInteger(raw.introducedAtChapter) ? raw.introducedAtChapter : 1
-  );
+  const introducedAtChapter = parseChapterInt(raw.introducedAtChapter, 1);
 
   const rawDescriptions = Array.isArray(raw.descriptions) ? raw.descriptions : [];
   const descriptions = rawDescriptions.map((d: any, idx: number) => {
     const text = String(d.text || d.description || d.content || `Character arc ${idx + 1}`).trim();
-    let validFrom = Number.isInteger(d.validFrom) ? Math.max(1, d.validFrom) : introducedAtChapter;
-    let validUntil = Number.isInteger(d.validUntil) && d.validUntil > 0 ? d.validUntil : null;
+    const validFrom = parseChapterInt(d.validFrom, introducedAtChapter);
+    let validUntil = parseChapterIntOrNull(d.validUntil);
     if (validUntil !== null && validUntil <= validFrom) {
       validUntil = validFrom + 20;
+    }
+    if (totalChapters > 0 && validUntil !== null && validUntil > totalChapters) {
+      validUntil = null;
     }
     return {
       text,
@@ -219,8 +240,8 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
     if (!["Alive", "Deceased", "Imprisoned", "MIA", "Unknown"].includes(status)) {
       status = "Alive";
     }
-    let validFrom = Number.isInteger(s.validFrom) ? Math.max(1, s.validFrom) : introducedAtChapter;
-    let validUntil = Number.isInteger(s.validUntil) && s.validUntil > 0 ? s.validUntil : null;
+    const validFrom = parseChapterInt(s.validFrom, introducedAtChapter);
+    let validUntil = parseChapterIntOrNull(s.validUntil);
     if (validUntil !== null && validUntil <= validFrom) {
       validUntil = null;
     }
@@ -249,8 +270,8 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
       if (relationType.toLowerCase() === "connected" || relationType.toLowerCase() === "related") {
         relationType = "Ally";
       }
-      let validFrom = Number.isInteger(r.validFrom) ? Math.max(1, r.validFrom) : introducedAtChapter;
-      let validUntil = Number.isInteger(r.validUntil) && r.validUntil > 0 ? r.validUntil : null;
+      const validFrom = parseChapterInt(r.validFrom, introducedAtChapter);
+      let validUntil = parseChapterIntOrNull(r.validUntil);
       if (validUntil !== null && validUntil <= validFrom) {
         validUntil = null;
       }
@@ -268,8 +289,8 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
   const factions = rawFactions
     .map((f: any) => {
       const factionName = String(f.factionName || f.name || f.faction || "").trim();
-      let validFrom = Number.isInteger(f.validFrom) ? Math.max(1, f.validFrom) : introducedAtChapter;
-      let validUntil = Number.isInteger(f.validUntil) && f.validUntil > 0 ? f.validUntil : null;
+      const validFrom = parseChapterInt(f.validFrom, introducedAtChapter);
+      let validUntil = parseChapterIntOrNull(f.validUntil);
       if (validUntil !== null && validUntil <= validFrom) {
         validUntil = null;
       }
@@ -314,6 +335,26 @@ ${compactWikitext}`;
 
   let lastModelError: unknown = null;
 
+  const groqSystemPrompt = `${SYSTEM_INSTRUCTION}
+
+REQUIRED JSON STRUCTURE:
+{
+  "introducedAtChapter": 1,
+  "descriptions": [
+    { "text": "description phase", "validFrom": 1, "validUntil": null, "isSensitive": false }
+  ],
+  "statuses": [
+    { "status": "Alive", "validFrom": 1, "validUntil": null, "isSensitive": false }
+  ],
+  "relationships": [
+    { "targetName": "Target Character Name", "relationType": "Friend / Ally / Lover / Enemy / etc.", "validFrom": 1, "validUntil": null, "isSensitive": false }
+  ],
+  "factions": [
+    { "factionName": "Faction or Guild Name", "validFrom": 1, "validUntil": null, "isSensitive": false }
+  ]
+}
+Extract all relationships mentioned in the wikitext, infobox, or history.`;
+
   for (const groqModel of groqModels) {
     console.log(`[Groq-Fallback] Memproses ${characterName} menggunakan ${groqModel}...`);
 
@@ -328,7 +369,7 @@ ${compactWikitext}`;
         body: JSON.stringify({
           model: groqModel,
           messages: [
-            { role: "system", content: SYSTEM_INSTRUCTION },
+            { role: "system", content: groqSystemPrompt },
             { role: "user", content: userPrompt },
           ],
           response_format: { type: "json_object" },
@@ -354,7 +395,12 @@ ${compactWikitext}`;
 
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || "{}";
-      const parsed = JSON.parse(content);
+      let parsed: any;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        parsed = {};
+      }
       const normalized = normalizeGeminiOutput(parsed, totalChapters);
       console.log(`[Groq-Fallback] Berhasil: ${characterName} (${normalized.descriptions.length} desc phases, ${normalized.relationships.length} relations)`);
       return normalized;
@@ -377,13 +423,17 @@ async function parseWithGoogleGenAI(
   label: string,
 ): Promise<GeminiParsedCharacter> {
   let lastErr: unknown = null;
+  let connectionHangs = false;
+
   for (let i = 0; i < models.length; i++) {
+    if (connectionHangs) break;
     const rawModel = models[i];
     const model = rawModel.replace(/^(gemini\/|models\/)/, "");
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         console.log(`[${label}] Ekstraksi untuk ${characterName} dengan ${model} (attempt ${attempt})...`);
-        const response = await ai.models.generateContent({
+        const timeoutMs = 8000;
+        const genPromise = ai.models.generateContent({
           model,
           contents: userPrompt,
           config: {
@@ -394,6 +444,13 @@ async function parseWithGoogleGenAI(
           },
         });
 
+        const response = await Promise.race([
+          genPromise,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Gemini timeout (${timeoutMs}ms)`)), timeoutMs)
+          ),
+        ]);
+
         const text = response.text?.trim() ?? "";
         const parsed = JSON.parse(text);
         const normalized = normalizeGeminiOutput(parsed, totalChapters);
@@ -402,9 +459,19 @@ async function parseWithGoogleGenAI(
       } catch (err: any) {
         console.warn(`[${label}] Model ${model} attempt ${attempt} gagal: ${err.message || String(err)}`);
         lastErr = err;
-        if (err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED") || String(err).includes("429")) {
-          console.log(`[${label}-Quota] Model ${model} kena 429. Lanjut ke model berikut...`);
-          await new Promise((r) => setTimeout(r, 2000));
+        if (err?.message?.includes("timeout") || err?.message?.includes("ETIMEDOUT")) {
+          console.log(`[${label}] Koneksi Gemini timeout / tidak merespons. Beralih ke provider cadangan (Groq/OpenRouter)...`);
+          connectionHangs = true;
+          break;
+        }
+        if (
+          err?.message?.includes("Quota exceeded") ||
+          err?.message?.includes("RESOURCE_EXHAUSTED") ||
+          err?.message?.includes("429") ||
+          String(err).includes("429")
+        ) {
+          console.log(`[${label}-Quota] Kuota Gemini habis (429/RESOURCE_EXHAUSTED). Beralih ke provider cadangan (Groq/OpenRouter)...`);
+          connectionHangs = true;
           break;
         }
         if (attempt < 2) {
@@ -447,7 +514,7 @@ async function parseWithOpenRouter(
 
     if (!response.ok) {
       const errText = await response.text();
-      console.warn(`[OpenRouter-Fallback] Model ${model} gagal (${response.status}). Beralih ke model berikutnya...`);
+      console.warn(`[OpenRouter-Fallback] Model ${model} gagal (${response.status}): ${errText}. Beralih ke model berikutnya...`);
       continue;
     }
 

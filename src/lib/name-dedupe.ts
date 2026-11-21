@@ -20,11 +20,17 @@ export function normalizeName(s: string): string {
 }
 
 export function canonicalizeName(s: string): string {
-  return s.toLowerCase().replace(/[\s\-_'.]/g, "");
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\s\-_'.]/g, "");
 }
 
 function wordTokens(s: string): string[] {
   return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[\-']/g, "")
     .split(/\s+/)
@@ -52,6 +58,9 @@ const CURATED_PAIRS: Array<[string, string]> = [
   ["edrothstaylor", "edrothtaylor"], // The Extra's Academy Survival Guide
   ["teresadelaurentis", "teresadulaurentia"], // I'm the Max-Level Newbie
   ["kangjinhyuk", "jinhyeokkang"], // I'm the Max-Level Newbie
+  ["corinlocke", "corinloque"], // I Killed the Main Player
+  ["alishaaden", "arishaaden"], // I Killed the Main Player
+  ["seoriyeowang", "frostqueen"], // The Frozen Player Returns
 ];
 
 export type MergeReason = "canon-equal" | "token-reorder" | "curated-pair";
