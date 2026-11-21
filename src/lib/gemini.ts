@@ -524,8 +524,10 @@ ${wikitext}`;
     }
   }
 
-  // 4. Order 4: Gemini Gemma models via GEMINI_API_KEY (same Gemini API key)
-  if (ai) {
+  // 4. Order 4: Gemini Gemma models via GEMINI_API_KEY (same Gemini API key).
+  // Only valid as order 4 — skip if orders 2/3 were never configured,
+  // otherwise Gemma silently becomes the de-facto first fallback.
+  if (ai && groqApiKey && openrouterApiKey) {
     const gemmaModels = getGemmaModels();
     console.log(`[LLM-Fallback] Mengalihkan ke Gemini Gemma (${gemmaModels.join(" -> ")})...`);
     try {
@@ -534,6 +536,8 @@ ${wikitext}`;
       console.warn(`[Gemma-Fallback] Gagal memproses dengan Gemini Gemma: ${gemmaErr.message}`);
       lastError = gemmaErr;
     }
+  } else if (ai && (!groqApiKey || !openrouterApiKey)) {
+    console.warn(`[LLM-Fallback] Gemma (order 4) dilewati: GROQ_API_KEY / OPENROUTER_API_KEY belum terkonfigurasi di process ini. Restart server/daemon setelah mengisi .env.`);
   }
 
   throw new Error(`Semua provider LLM (1. Gemini, 2. Groq, 3. OpenRouter, 4. Gemini Gemma) gagal. Error terakhir: ${lastError instanceof Error ? lastError.message : String(lastError)}`);

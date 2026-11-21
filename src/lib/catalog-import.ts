@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { fetchPopularMediaPage } from "@/lib/anilist";
-import { fetchLiveChapterCount } from "@/lib/live-chapters";
+import { fetchLiveMangaInfo } from "@/lib/live-chapters";
 
 export interface CatalogImportResult {
   imported: number;
@@ -108,16 +108,29 @@ async function runImport({
               typeof item.chapters === "number" && item.chapters > 0
                 ? item.chapters
                 : 0;
+            let resolvedStatus = item.status;
+
+            const live = await fetchLiveMangaInfo(item.title);
+            if (live) {
+              if (!chapters && live.chapters && live.chapters > 0) {
+                chapters = live.chapters;
+              }
+              if (
+                live.status &&
+                (live.status === "FINISHED" || live.status === "CANCELLED" || live.status === "HIATUS")
+              ) {
+                resolvedStatus = live.status;
+              }
+            }
 
             if (!chapters) {
-              const live = await fetchLiveChapterCount(item.title);
-              chapters = live && live > 0 ? live : 100;
+              chapters = 100;
             }
 
             try {
               const existing = await prisma.media.findUnique({
                 where: { anilistId: item.id },
-                select: { id: true, totalChapters: true },
+                select: { id: true, totalChapters: true, status: true },
               });
 
               if (existing) {
@@ -126,13 +139,20 @@ async function runImport({
                     ? existing.totalChapters
                     : chapters;
 
+                // Don't overwrite an already FINISHED/CANCELLED status with RELEASING
+                const finalStatus =
+                  resolvedStatus === "RELEASING" &&
+                  (existing.status === "FINISHED" || existing.status === "CANCELLED")
+                    ? existing.status
+                    : resolvedStatus;
+
                 await prisma.media.update({
                   where: { id: existing.id },
                   data: {
                     title: item.title,
                     coverImage: cover,
                     totalChapters: resolvedChapters,
-                    status: item.status,
+                    status: finalStatus,
                     contentRating: item.contentRating,
                     genres: item.genres,
                   },
@@ -148,7 +168,7 @@ async function runImport({
                     totalChapters: chapters,
                     chapterNumberingSource: "anilist",
                     countryOfOrigin: country,
-                    status: item.status,
+                    status: resolvedStatus,
                     contentRating: item.contentRating,
                     genres: item.genres,
                   },

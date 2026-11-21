@@ -1,8 +1,15 @@
 import https from "node:https";
 import { prisma } from "./prisma";
 
-// In-memory cache for live chapter counts to prevent redundant queries
-const chapterCache = new Map<string, { chapters: number; timestamp: number }>();
+// In-memory cache for live manga info to prevent redundant queries
+export type MediaReleaseStatus = "RELEASING" | "FINISHED" | "CANCELLED" | "HIATUS";
+
+export interface LiveMangaData {
+  chapters: number | null;
+  status: MediaReleaseStatus | null;
+}
+
+const liveMangaCache = new Map<string, { data: LiveMangaData; timestamp: number }>();
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 function requestIPv4(url: string, options: { method?: string; body?: string; headers?: Record<string, string> } = {}) {
@@ -59,16 +66,48 @@ function parseChapterFromDetail(detail: any): number | null {
   return null;
 }
 
+export function parseStatusFromDetail(detail: any): MediaReleaseStatus | null {
+  if (!detail) return null;
+  const statusStr: string = detail.status || "";
+  const firstLine = statusStr.split("\n")[0] || "";
+
+  // 1. Cancelled / Discontinued / Dropped
+  if (/\b(Discontinued|Cancelled|Dropped)\b/i.test(firstLine)) {
+    return "CANCELLED";
+  }
+
+  // 2. Completed / Finished
+  if (detail.completed === true || /\b(Complete|Finished)\b/i.test(firstLine)) {
+    // If first line explicitly indicates Ongoing without Complete (e.g. ongoing side stories or ongoing print)
+    if (/\bOngoing\b/i.test(firstLine) && !/\b(Complete|Finished)\b/i.test(firstLine)) {
+      return "RELEASING";
+    }
+    return "FINISHED";
+  }
+
+  // 3. Hiatus
+  if (/\bHiatus\b/i.test(firstLine)) {
+    return "HIATUS";
+  }
+
+  // 4. Ongoing
+  if (/\bOngoing\b/i.test(firstLine)) {
+    return "RELEASING";
+  }
+
+  return null;
+}
+
 /**
- * Searches MangaUpdates for the title and retrieves the actual live chapter count.
+ * Searches MangaUpdates for the title and retrieves live chapter count and release status.
  */
-export async function fetchLiveChapterCount(title: string): Promise<number | null> {
+export async function fetchLiveMangaInfo(title: string): Promise<LiveMangaData | null> {
   const normalizedTitle = title.trim();
   if (!normalizedTitle) return null;
 
-  const cached = chapterCache.get(normalizedTitle);
+  const cached = liveMangaCache.get(normalizedTitle);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return cached.chapters;
+    return cached.data;
   }
 
   try {
@@ -86,47 +125,90 @@ export async function fetchLiveChapterCount(title: string): Promise<number | nul
 
     if (!searchRes.ok) return null;
     const searchData = await searchRes.json();
-    const topRecord = searchData?.results?.[0]?.record;
-    if (!topRecord?.series_id) return null;
+    const results = searchData?.results || [];
+    if (!results.length) return null;
 
-    const detailRes = await requestIPv4(`https://api.mangaupdates.com/v1/series/${topRecord.series_id}`);
+    // Prefer non-novel entries if title has manga/manhwa adaptation
+    const bestRecord =
+      results.find((r: any) => r.record?.type && r.record.type.toLowerCase() !== "novel")?.record ||
+      results[0]?.record;
+
+    if (!bestRecord?.series_id) return null;
+
+    const detailRes = await requestIPv4(`https://api.mangaupdates.com/v1/series/${bestRecord.series_id}`);
     if (!detailRes.ok) return null;
     const detail = await detailRes.json();
 
-    const count = parseChapterFromDetail(detail);
-    if (count && count > 0) {
-      chapterCache.set(normalizedTitle, { chapters: count, timestamp: Date.now() });
-      return count;
-    }
-  } catch (err) {
-    console.warn(`[live-chapters] Failed to fetch live chapters for "${title}":`, err instanceof Error ? err.message : err);
-  }
+    const chapters = parseChapterFromDetail(detail);
+    const status = parseStatusFromDetail(detail);
 
-  return null;
+    const data: LiveMangaData = { chapters, status };
+    liveMangaCache.set(normalizedTitle, { data, timestamp: Date.now() });
+    return data;
+  } catch (err) {
+    console.warn(`[live-chapters] Failed to fetch live info for "${title}":`, err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 /**
- * Checks and updates a specific Media record with the live chapter count if currently releasing.
+ * Searches MangaUpdates for the title and retrieves the actual live chapter count.
  */
-export async function syncMediaLiveChapters(mediaId: string): Promise<number | null> {
+export async function fetchLiveChapterCount(title: string): Promise<number | null> {
+  const info = await fetchLiveMangaInfo(title);
+  return info?.chapters ?? null;
+}
+
+/**
+ * Searches MangaUpdates for the title and retrieves the authoritative release status.
+ */
+export async function fetchLiveStatus(title: string): Promise<MediaReleaseStatus | null> {
+  const info = await fetchLiveMangaInfo(title);
+  return info?.status ?? null;
+}
+
+/**
+ * Checks and updates a specific Media record with the live chapter count and release status.
+ */
+export async function syncMediaLiveChapters(mediaId: string): Promise<{ totalChapters: number; status: string } | null> {
   try {
     const media = await prisma.media.findUnique({
       where: { id: mediaId },
       select: { id: true, title: true, status: true, totalChapters: true },
     });
 
-    if (!media || media.status !== "RELEASING") return null;
+    if (!media) return null;
 
-    const liveCount = await fetchLiveChapterCount(media.title);
-    if (liveCount && liveCount > 0 && liveCount !== media.totalChapters) {
-      await prisma.media.update({
-        where: { id: mediaId },
-        data: { totalChapters: liveCount },
-      });
-      return liveCount;
+    const live = await fetchLiveMangaInfo(media.title);
+    if (!live) return { totalChapters: media.totalChapters, status: media.status };
+
+    const updateData: { totalChapters?: number; status?: string } = {};
+
+    if (live.chapters && live.chapters > 0 && live.chapters !== media.totalChapters) {
+      updateData.totalChapters = live.chapters;
     }
 
-    return media.totalChapters;
+    if (live.status && live.status !== media.status) {
+      if (
+        live.status === "FINISHED" ||
+        live.status === "CANCELLED" ||
+        live.status === "HIATUS" ||
+        media.status === "RELEASING"
+      ) {
+        updateData.status = live.status;
+      }
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      const updated = await prisma.media.update({
+        where: { id: mediaId },
+        data: updateData,
+        select: { totalChapters: true, status: true },
+      });
+      return updated;
+    }
+
+    return { totalChapters: media.totalChapters, status: media.status };
   } catch (err) {
     console.error(`[live-chapters] Error syncing media ${mediaId}:`, err);
     return null;

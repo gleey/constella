@@ -149,11 +149,17 @@ async function runCatalogSync(targetAnilistId?: number) {
           totalChapters: anilistDetail.chapters || 100,
           chapterNumberingSource: "official_en",
           countryOfOrigin: anilistDetail.countryOfOrigin || "KR",
+          status: anilistDetail.status,
+          contentRating: anilistDetail.contentRating,
+          genres: anilistDetail.genres,
         },
         update: {
           title: anilistDetail.title,
           coverImage: anilistDetail.coverImage,
           totalChapters: anilistDetail.chapters && anilistDetail.chapters > 0 ? anilistDetail.chapters : undefined,
+          status: anilistDetail.status !== "RELEASING" ? anilistDetail.status : undefined,
+          contentRating: anilistDetail.contentRating,
+          genres: anilistDetail.genres,
         },
       });
 
@@ -572,7 +578,28 @@ async function runLoreSync(targetAnilistId?: number) {
       // Prioritize MAIN characters (limit to 6 to control AI token cost)
       const priorityChars = dbCharacters.slice(0, 6);
 
-      for (const dbChar of priorityChars) {
+      // Skip serial/karakter yang sudah punya lore hasil ekstraksi AI.
+      // Placeholder dari auto-sync ("X is a character featured in Y.") tidak dihitung.
+      const syncedRows = await prisma.characterDescription.findMany({
+        where: {
+          character: { mediaId: media.id },
+          NOT: { text: { contains: "is a character featured in" } },
+        },
+        select: { characterId: true },
+        distinct: ["characterId"],
+      });
+      const syncedIds = new Set(syncedRows.map((d) => d.characterId));
+      const pendingChars = priorityChars.filter((c) => !syncedIds.has(c.id));
+
+      if (pendingChars.length === 0) {
+        addLog(`[SKIP] ${media.title} sudah memiliki lore AI untuk semua karakter prioritas — lewati (hemat token AI).`);
+        globalState.completedSeries++;
+        globalState.progress = Math.round((globalState.completedSeries / globalState.totalSeries) * 100);
+        continue;
+      }
+      addLog(`[Lore Sync] ${media.title}: ${pendingChars.length}/${priorityChars.length} karakter perlu diekstrak.`);
+
+      for (const dbChar of pendingChars) {
         globalState.currentCharacter = dbChar.name;
 
         // Fix broken character images while we're at it

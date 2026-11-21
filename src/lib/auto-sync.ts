@@ -9,7 +9,7 @@ import { fetchPopularMedia, fetchMediaDetail, type CharacterDetail } from "./ani
 import { resolveFandomWikiSubdomain, fetchCharacterImage, fetchFandomCategoryCharacters } from "./fandom";
 import { resolveCharacterName } from "./name-resolution";
 import { normalizeName } from "./name-dedupe";
-import { fetchLiveChapterCount } from "./live-chapters";
+import { fetchLiveMangaInfo } from "./live-chapters";
 
 export interface SyncResultItem {
   id: string;
@@ -55,12 +55,26 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
       const detail = await fetchMediaDetail(item.id);
 
       let resolvedChapters = detail.chapters && detail.chapters > 0 ? detail.chapters : 0;
-      if (!resolvedChapters) {
-        const live = await fetchLiveChapterCount(detail.title);
-        resolvedChapters = live && live > 0 ? live : 100;
+      let resolvedStatus = detail.status;
+
+      const live = await fetchLiveMangaInfo(detail.title);
+      if (live) {
+        if (!resolvedChapters && live.chapters && live.chapters > 0) {
+          resolvedChapters = live.chapters;
+        }
+        if (
+          live.status &&
+          (live.status === "FINISHED" || live.status === "CANCELLED" || live.status === "HIATUS")
+        ) {
+          resolvedStatus = live.status;
+        }
       }
 
-      // 1. Upsert Media with verified live cover and chapter counts
+      if (!resolvedChapters) {
+        resolvedChapters = 100;
+      }
+
+      // 1. Upsert Media with verified live cover, chapter counts, and release status
       const media = await prisma.media.upsert({
         where: { anilistId: detail.id },
         create: {
@@ -71,11 +85,17 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
           totalChapters: resolvedChapters,
           chapterNumberingSource: "official_en",
           countryOfOrigin: detail.countryOfOrigin || "KR",
+          status: resolvedStatus,
+          contentRating: detail.contentRating,
+          genres: detail.genres,
         },
         update: {
           title: detail.title,
           coverImage: detail.coverImage,
           totalChapters: resolvedChapters !== 100 ? resolvedChapters : undefined,
+          status: resolvedStatus !== "RELEASING" ? resolvedStatus : undefined,
+          contentRating: detail.contentRating,
+          genres: detail.genres,
         },
       });
 
