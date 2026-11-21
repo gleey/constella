@@ -99,7 +99,7 @@ async function runImport({
         await Promise.all(
           chunk.map(async (item) => {
             const cover = item.coverImage;
-            if (!cover || !item.title) {
+            if (item.format === "NOVEL" || !cover || !item.title) {
               result.skipped += 1;
               return;
             }
@@ -159,6 +159,19 @@ async function runImport({
                 });
                 result.updated += 1;
               } else {
+                // Avoid inserting duplicate titles with different AniList IDs
+                const duplicateTitle = await prisma.media.findFirst({
+                  where: {
+                    title: { equals: item.title, mode: "insensitive" },
+                  },
+                  select: { id: true },
+                });
+
+                if (duplicateTitle) {
+                  result.skipped += 1;
+                  return;
+                }
+
                 await prisma.media.create({
                   data: {
                     anilistId: item.id,

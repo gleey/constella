@@ -113,7 +113,7 @@ const DISCOVERY_QUERY = `
 query ($page: Int, $perPage: Int, $countryOfOrigin: CountryCode, $sort: [MediaSort], $status: MediaStatus) {
   Page(page: $page, perPage: $perPage) {
     pageInfo { lastPage total }
-    media(type: MANGA, sort: $sort, countryOfOrigin: $countryOfOrigin, status: $status) {
+    media(type: MANGA, format_in: [MANGA, ONE_SHOT], sort: $sort, countryOfOrigin: $countryOfOrigin, status: $status) {
       id
       title { romaji english native }
       coverImage { extraLarge large medium }
