@@ -72,17 +72,42 @@ export async function resolveFandomWikiSubdomain(
     }
   }
 
-  // Common phrase replacements in Webtoons / Manhwa
-  if (baseSlug.includes("that-returned")) {
-    candidates.push(baseSlug.replace("that-returned", "who-returned"));
+  // Colon-based subtitles: try just the part before the colon
+  // e.g., "Demon Slayer: Kimetsu no Yaiba" → "demon-slayer" and "kimetsu-no-yaiba"
+  if (seriesTitle.includes(":") || seriesTitle.includes("–") || seriesTitle.includes("-")) {
+    const parts = seriesTitle.split(/[:–]/).map((p) => p.trim()).filter(Boolean);
+    for (const part of parts) {
+      const pClean = cleanTitle(part);
+      if (pClean.length > 3) {
+        candidates.push(toSlug(pClean));
+        candidates.push(toNoHyphen(pClean));
+      }
+    }
   }
-  if (baseSlug.includes("who-returned")) {
-    candidates.push(baseSlug.replace("who-returned", "that-returned"));
+
+  // Common transliteration / title swaps in webtoons / manhwa / manga
+  const slugSwaps: [RegExp, string][] = [
+    [/that-returned/, "who-returned"],
+    [/who-returned/, "that-returned"],
+    [/machine$/, "mashine"],
+    [/machine$/, "mashin"],
+    [/cant/, "can-t"],
+    [/can-t/, "cant"],
+    [/isnt/, "isn-t"],
+    [/isn-t/, "isnt"],
+    [/swordmaster(?!s)/, "swordmasters"],
+  ];
+  for (const [pat, rep] of slugSwaps) {
+    if (pat.test(baseSlug)) {
+      candidates.push(baseSlug.replace(pat, rep));
+    }
   }
 
   // Synonyms candidates
   for (const syn of synonyms) {
     if (!syn || typeof syn !== "string") continue;
+    // Skip non-Latin synonyms (CJK, Thai, etc.)
+    if (/^[\p{Script=Han}\p{Script=Hangul}\p{Script=Katakana}\p{Script=Hiragana}\p{Script=Thai}]/u.test(syn)) continue;
     const cSyn = cleanTitle(syn);
     if (!cSyn) continue;
     const synSlug = toSlug(cSyn);
@@ -98,21 +123,45 @@ export async function resolveFandomWikiSubdomain(
         candidates.push(synSlug.replace(p, ""));
       }
     }
-    if (synSlug.includes("that-returned")) {
-      candidates.push(synSlug.replace("that-returned", "who-returned"));
+    for (const [pat, rep] of slugSwaps) {
+      if (pat.test(synSlug)) {
+        candidates.push(synSlug.replace(pat, rep));
+      }
     }
-    if (synSlug.includes("who-returned")) {
-      candidates.push(synSlug.replace("who-returned", "that-returned"));
+    // Colon splits for synonyms
+    if (syn.includes(":")) {
+      const parts = syn.split(":").map((p) => p.trim()).filter(Boolean);
+      for (const part of parts) {
+        const pClean = cleanTitle(part);
+        if (pClean.length > 3) {
+          candidates.push(toSlug(pClean));
+          candidates.push(toNoHyphen(pClean));
+        }
+      }
     }
   }
 
-  const uniqueCandidates = Array.from(new Set(candidates.filter(Boolean)));
+  // Filter acronyms that are too short (<= 3 chars) and can match unrelated wikis;
+  // only keep them if nothing else works (try longer candidates first).
+  const longCandidates: string[] = [];
+  const shortAcronyms: string[] = [];
+  for (const c of Array.from(new Set(candidates.filter(Boolean)))) {
+    if (c.length <= 3) {
+      shortAcronyms.push(c);
+    } else {
+      longCandidates.push(c);
+    }
+  }
+  const uniqueCandidates = [...longCandidates, ...shortAcronyms];
 
   let bestCand: string | null = null;
   let maxArticles = -1;
 
   for (const cand of uniqueCandidates) {
     try {
+      // If we already found a decent match, skip short acronyms (likely false positives)
+      if (cand.length <= 3 && bestCand && maxArticles >= 10) continue;
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3500);
       const res = await fetch(`https://${cand}.fandom.com/api.php?action=query&meta=siteinfo&siprop=general|statistics&format=json`, {
@@ -125,6 +174,8 @@ export async function resolveFandomWikiSubdomain(
         const json = await res.json();
         if (json?.query?.general?.sitename) {
           const articles = json?.query?.statistics?.articles || 0;
+          // Skip tiny unrelated wikis for short acronym candidates
+          if (cand.length <= 3 && articles < 15) continue;
           if (articles > maxArticles) {
             maxArticles = articles;
             bestCand = cand;

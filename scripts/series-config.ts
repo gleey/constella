@@ -22,31 +22,27 @@ const FANDOM_WIKI_OVERRIDES: Record<number, { fandomWiki: string; mainCharacters
     fandomWiki: "omniscient-readers-viewpoint",
     mainCharacters: ["Kim Dokja", "Yoo Joonghyuk", "Han Sooyoung", "Yoo Sangah", "Jung Heewon", "Lee Hyunsung", "Lee Gilyoung", "Shin Yoosung", "Lee Jihye"],
   },
-  108577: {
-    fandomWiki: "tbate",
-    mainCharacters: ["Arthur Leywin", "Tessia Eralith", "Sylvie", "Virion Eralith", "Reynolds Leywin", "Alice Leywin", "Kathyln Glayder", "Bairon Wykes"],
-  },
   85143: {
     fandomWiki: "towerofgod",
     mainCharacters: ["Twenty-Fifth Baam", "Koon Aguero Agnis", "Rak Wraithraiser", "Rachel", "Ha Yuri Zahard", "Androssi Zahard", "Urek Mazino", "Khun Ran"],
   },
-  144405: {
+  144957: { // The World After the Fall (manhwa)
     fandomWiki: "the-world-after-the-fall",
     mainCharacters: ["Jaehwan", "Mino", "Chungho", "Yoonhwan", "Karlton", "Sirwen Armelt"],
   },
-  119717: {
+  117460: { // Overgeared
     fandomWiki: "overgeared",
     mainCharacters: ["Shin Youngwoo", "Yura", "Jishuka", "Huroi", "Vantner", "Pon", "Kraugel", "Piaro", "Khan"],
   },
-  136192: {
+  137280: { // I'm the Max-Level Newbie
     fandomWiki: "max-level-newbie",
     mainCharacters: ["Kang Jinhyuk", "Teresa de Laurentis", "Alice at the End of the World", "Judas", "An Hyunjin", "Elise de Laurentis"],
   },
-  161852: {
+  163824: { // Revenge of the Baskerville Bloodhound
     fandomWiki: "revenge-of-the-ironblooded-sword-hound",
     mainCharacters: ["Vikir Van Baskerville", "Hugo Le Baskerville", "Aiyen", "Pomerian Morg", "Camus Morg", "Sinclair"],
   },
-  153284: {
+  153284: { // After Ten Millennia in Hell
     fandomWiki: "player-who-returned-10000-years-later",
     mainCharacters: ["Oh Kang Woo", "Han Seol-ah", "Kim Shi-hoon", "Echidna", "Cha Yeon-joo", "Baek Hwa-yeon"],
   },
@@ -62,21 +58,94 @@ const FANDOM_WIKI_OVERRIDES: Record<number, { fandomWiki: string; mainCharacters
     fandomWiki: "the-extras-academy-survival-guide",
     mainCharacters: ["Ed Rothtaylor", "Lucy Mayrill", "Yenika Faelorr", "Lortelle Keheln", "Taylee McLaure", "Princess Penia"],
   },
+  // Titles whose Fandom subdomain differs substantially from the English title
+  126297: { fandomWiki: "mercenary-enrollment" },        // Teenage Mercenary
+  120980: { fandomWiki: "nano-mashine" },                 // Nano Machine
+  118424: { fandomWiki: "the-great-mage" },               // The Archmage Returns After 4000 Years
+  114605: { fandomWiki: "survival-story-of-a-sword-king-in-a-fantasy-world" }, // Latna Saga
+  138222: { fandomWiki: "leveling-with-the-gods" },       // Level Up with the Gods
+  132144: { fandomWiki: "return-of-the-mount-hua-sect" }, // Return of the Blossoming Blade
+  149332: { fandomWiki: "swordmasters-youngest-son" },    // The Swordmaster's Son
+  103156: { fandomWiki: "skeleton-soldier" },              // The Skeleton Soldier Failed to Defend the Dungeon
+  38586:  { fandomWiki: "thebreaker" },                    // THE BREAKER
+  52651:  { fandomWiki: "thebreaker" },                    // THE BREAKER - NEW WAVES
+  87216:  { fandomWiki: "kimetsu-no-yaiba" },              // Demon Slayer: Kimetsu no Yaiba
+  100994: { fandomWiki: "jigokuraku" },                    // Hell's Paradise: Jigokuraku
+  117195: { fandomWiki: "oshinoko" },                      // [Oshi no Ko]
+  31706:  { fandomWiki: "jojo" },                          // JoJo's Bizarre Adventure: Part 7
+  150836: { fandomWiki: "academys-undercover-professor" }, // The Academy's Undercover Professor
+  130511: { fandomWiki: "the-player-who-cant-level-up" },  // The Player Who Can't Level Up
+  151512: { fandomWiki: "damn-reincarnation" },            // My Blasted Reincarnated Life
+  104973: { fandomWiki: "raeliana" },                      // The Reason Why Raeliana Ended Up at the Duke's Mansion
+  179445: { fandomWiki: "solo-leveling-ragnarok" },        // Solo Leveling: Ragnarok
+  118408: { fandomWiki: "villains-are-destined-to-die" },  // also: death-is-the-only-ending-for-the-villainess
 };
 
 /**
+ * Fetch AniList synonyms/romaji for a batch of AniList IDs.
+ * Returns a map of anilistId → string[] (all alternate titles).
+ */
+async function fetchAniListSynonyms(ids: number[]): Promise<Map<number, string[]>> {
+  const map = new Map<number, string[]>();
+  const BATCH = 40;
+  const query = `
+    query ($ids: [Int]) {
+      Page(page: 1, perPage: 50) {
+        media(id_in: $ids) {
+          id
+          title { romaji english }
+          synonyms
+        }
+      }
+    }
+  `;
+
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const batch = ids.slice(i, i + BATCH);
+    try {
+      const res = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, variables: { ids: batch } }),
+      });
+      const json = await res.json();
+      for (const m of json?.data?.Page?.media || []) {
+        const titles: string[] = [];
+        if (m.title?.romaji) titles.push(m.title.romaji);
+        if (m.title?.english) titles.push(m.title.english);
+        if (m.synonyms) titles.push(...m.synonyms);
+        map.set(m.id, titles);
+      }
+    } catch (err: any) {
+      console.warn(`[WIKI] Gagal fetch AniList synonyms batch ${i}: ${err.message}`);
+    }
+    if (i + BATCH < ids.length) await new Promise((r) => setTimeout(r, 350));
+  }
+  return map;
+}
+
+/**
  * Bangun konfigurasi untuk SEMUA media di database.
- * Seri baru otomatis ikut: subdomain wiki Fandom di-resolve dari judul.
+ * Seri baru otomatis ikut: subdomain wiki Fandom di-resolve dari judul + sinonim AniList.
  */
 export async function buildSeriesConfigs(): Promise<SeriesMapping[]> {
   const medias = await prisma.media.findMany({ orderBy: { createdAt: "asc" } });
+
+  // Pre-fetch AniList synonyms for media that don't have overrides
+  const idsNeedingSynonyms = medias
+    .filter((m) => !FANDOM_WIKI_OVERRIDES[m.anilistId]?.fandomWiki)
+    .map((m) => m.anilistId);
+  console.log(`[WIKI] Fetching AniList synonyms for ${idsNeedingSynonyms.length} media without overrides...`);
+  const synonymsMap = await fetchAniListSynonyms(idsNeedingSynonyms);
+
   const configs: SeriesMapping[] = [];
   for (const media of medias) {
     const override = FANDOM_WIKI_OVERRIDES[media.anilistId];
     let fandomWiki = override?.fandomWiki ?? "";
     if (!fandomWiki) {
-      console.log(`[WIKI] Me-resolve subdomain Fandom untuk "${media.title}"...`);
-      fandomWiki = (await resolveFandomWikiSubdomain(media.title)) || "";
+      const synonyms = synonymsMap.get(media.anilistId) || [];
+      console.log(`[WIKI] Me-resolve subdomain Fandom untuk "${media.title}" (${synonyms.length} sinonim)...`);
+      fandomWiki = (await resolveFandomWikiSubdomain(media.title, synonyms)) || "";
     }
     if (!fandomWiki) {
       console.warn(`[WIKI-WARN] Subdomain Fandom tidak ditemukan untuk "${media.title}". Cast Fandom dilewati.`);
