@@ -224,7 +224,7 @@ function FilterDropdown({
   }, [open, close]);
 
   return (
-    <div className="relative z-50" ref={ref}>
+    <div className={`relative ${open ? "z-50" : "z-10"}`} ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -232,7 +232,7 @@ function FilterDropdown({
         aria-expanded={open}
         className={`flex items-center gap-2 h-10 pl-3 pr-9 rounded-xl text-sm font-medium focus:outline-none transition cursor-pointer select-none ${
           isActive ? activeClass : inactiveClass
-        }`}
+        } ${open ? "ring-2 ring-indigo-500/50" : ""}`}
       >
         <Icon className={`w-4 h-4 shrink-0 transition-colors ${isActive ? iconActiveClass : iconInactiveClass}`} />
         <span className="whitespace-nowrap">{selectedLabel}</span>
@@ -244,7 +244,7 @@ function FilterDropdown({
       </button>
 
       {open && (
-        <div className="absolute z-[60] mt-1.5 left-0 min-w-full rounded-xl border border-white/10 bg-[#131b2e]/95 backdrop-blur-xl shadow-xl shadow-black/40">
+        <div className="absolute z-[60] mt-1.5 left-0 min-w-[170px] w-max rounded-xl border border-white/10 bg-[#0f172a] shadow-2xl shadow-black/80 p-1.5 backdrop-blur-xl">
           {options.map((opt) => (
             <button
               key={opt.value}
@@ -253,19 +253,20 @@ function FilterDropdown({
                 onChange(opt.value);
                 close();
               }}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer whitespace-nowrap text-left ${
                 value === opt.value
                   ? "bg-white/[0.08] text-white"
-                  : "text-slate-300 hover:bg-white/[0.06] hover:text-slate-100"
+                  : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
               }`}
             >
-              {value === opt.value && (
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 shrink-0 text-indigo-400" aria-hidden>
+              {value === opt.value ? (
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 shrink-0 text-indigo-400" aria-hidden>
                   <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
                 </svg>
+              ) : (
+                <span className="w-4 h-4 shrink-0" />
               )}
-              {value !== opt.value && <span className="w-3.5 shrink-0" />}
-              {opt.label}
+              <span>{opt.label}</span>
             </button>
           ))}
         </div>
@@ -563,7 +564,7 @@ export default function HomePage() {
         id="catalog"
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-14 flex-1 w-full"
       >
-        <div className="flex flex-col gap-6 mb-8">
+        <div className="relative z-30 flex flex-col gap-6 mb-8">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-5">
             <div>
               <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
@@ -599,7 +600,7 @@ export default function HomePage() {
           </div>
 
           {/* Filter Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-white/[0.02] ring-1 ring-white/10 backdrop-blur-sm">
+          <div className="relative z-30 flex flex-wrap items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-white/[0.02] ring-1 ring-white/10 backdrop-blur-sm">
             <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
               {/* Type filter dropdown */}
               <FilterDropdown
