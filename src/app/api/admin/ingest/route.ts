@@ -13,10 +13,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchMediaDetail } from "@/lib/anilist";
-import { fetchCharacterWikitextSmart } from "@/lib/fandom";
+import { fetchCharacterWikitextSmart, fetchFandomCategoryCharacters } from "@/lib/fandom";
 import { parseCharacterWikitext, type GeminiParsedCharacter } from "@/lib/gemini";
 import { resolveNames, resolveCharacterName, resolveFactionName } from "@/lib/name-resolution";
 import { validateTemporalBounds } from "@/lib/temporal";
+import { shouldMergeCharacters, canonicalizeName } from "@/lib/name-dedupe";
+import { isBrokenImageUrl } from "@/lib/auto-sync";
 
 export async function POST(req: NextRequest) {
   try {
@@ -49,8 +51,50 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 3. Upsert characters from AniList
-    for (const c of anilistData.characters) {
+    // 3. Upsert characters from AniList and merge Fandom Category:Characters
+    const castList: Array<{
+      name: string;
+      aliases: string[];
+      imageUrl: string;
+      role?: string;
+    }> = anilistData.characters.map((c) => ({
+      name: c.name,
+      aliases: [...(c.aliases || [])],
+      imageUrl: c.imageUrl,
+      role: c.role,
+    }));
+
+    if (wikiSubdomain) {
+      try {
+        const fandomChars = await fetchFandomCategoryCharacters(wikiSubdomain, 40);
+        for (const fc of fandomChars) {
+          const matchIndex = castList.findIndex((c) =>
+            shouldMergeCharacters(c.name, fc.name) !== null ||
+            canonicalizeName(c.name) === canonicalizeName(fc.name)
+          );
+          if (matchIndex >= 0) {
+            const matched = castList[matchIndex];
+            if (isBrokenImageUrl(matched.imageUrl) && fc.imageUrl) {
+              matched.imageUrl = fc.imageUrl;
+            }
+            if (!matched.aliases.includes(fc.name)) {
+              matched.aliases.push(fc.name);
+            }
+          } else {
+            castList.push({
+              name: fc.name,
+              aliases: [],
+              imageUrl: fc.imageUrl,
+              role: "SUPPORTING",
+            });
+          }
+        }
+      } catch (e: any) {
+        console.warn(`[Admin Ingest] Failed to fetch Fandom category characters: ${e.message}`);
+      }
+    }
+
+    for (const c of castList) {
       const existing = await prisma.character.findFirst({
         where: {
           mediaId: media.id,
@@ -68,11 +112,19 @@ export async function POST(req: NextRequest) {
           },
         });
       } else {
-        // Update aliases or imageUrl if missing
-        if (!existing.imageUrl && c.imageUrl) {
+        // Update aliases or imageUrl if missing or broken
+        const updateData: { imageUrl?: string; aliases?: string[] } = {};
+        if ((!existing.imageUrl || isBrokenImageUrl(existing.imageUrl)) && c.imageUrl) {
+          updateData.imageUrl = c.imageUrl;
+        }
+        const mergedAliases = Array.from(new Set([...existing.aliases, ...c.aliases]));
+        if (mergedAliases.length > existing.aliases.length) {
+          updateData.aliases = mergedAliases;
+        }
+        if (Object.keys(updateData).length > 0) {
           await prisma.character.update({
             where: { id: existing.id },
-            data: { imageUrl: c.imageUrl },
+            data: updateData,
           });
         }
       }
