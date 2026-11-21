@@ -99,7 +99,7 @@ async function run() {
     );
 
     // Polite delay between batches to respect MangaUpdates
-    await sleep(150);
+    await sleep(200);
 
     const progress = Math.min(i + CONCURRENCY, releasingMedia.length);
     if (progress % 30 === 0 || progress === releasingMedia.length) {
