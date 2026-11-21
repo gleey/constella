@@ -224,27 +224,27 @@ function FilterDropdown({
   }, [open, close]);
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative z-50" ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={ariaLabel}
         aria-expanded={open}
-        className={`flex items-center gap-2 h-9 pl-3 pr-8 rounded-xl text-xs font-medium focus:outline-none transition cursor-pointer select-none ${
+        className={`flex items-center gap-2 h-10 pl-3 pr-9 rounded-xl text-sm font-medium focus:outline-none transition cursor-pointer select-none ${
           isActive ? activeClass : inactiveClass
         }`}
       >
-        <Icon className={`w-3.5 h-3.5 shrink-0 transition-colors ${isActive ? iconActiveClass : iconInactiveClass}`} />
+        <Icon className={`w-4 h-4 shrink-0 transition-colors ${isActive ? iconActiveClass : iconInactiveClass}`} />
         <span className="whitespace-nowrap">{selectedLabel}</span>
         <ChevronDownIcon
-          className={`w-3.5 h-3.5 absolute right-2.5 pointer-events-none transition-transform ${
+          className={`w-4 h-4 absolute right-2.5 pointer-events-none transition-transform ${
             open ? "rotate-180" : ""
           } ${chevronClass ?? (isActive ? iconActiveClass : "text-slate-400")}`}
         />
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1.5 left-0 min-w-[140px] rounded-xl border border-white/10 bg-[#131b2e]/95 backdrop-blur-xl shadow-xl shadow-black/40 overflow-hidden animate-dropdown-in">
+        <div className="absolute z-[60] mt-1.5 left-0 min-w-full rounded-xl border border-white/10 bg-[#131b2e]/95 backdrop-blur-xl shadow-xl shadow-black/40 overflow-hidden animate-dropdown-in">
           {options.map((opt) => (
             <button
               key={opt.value}
@@ -253,18 +253,18 @@ function FilterDropdown({
                 onChange(opt.value);
                 close();
               }}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium transition-colors cursor-pointer ${
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap ${
                 value === opt.value
                   ? "bg-white/[0.08] text-white"
                   : "text-slate-300 hover:bg-white/[0.06] hover:text-slate-100"
               }`}
             >
               {value === opt.value && (
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 text-indigo-400" aria-hidden>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 shrink-0 text-indigo-400" aria-hidden>
                   <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
                 </svg>
               )}
-              {value !== opt.value && <span className="w-3 shrink-0" />}
+              {value !== opt.value && <span className="w-3.5 shrink-0" />}
               {opt.label}
             </button>
           ))}
