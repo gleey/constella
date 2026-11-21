@@ -110,16 +110,13 @@ async function runImport({
                 : 0;
             let resolvedStatus = item.status;
 
+            // Use MangaUpdates only for live chapter count if AniList didn't provide it.
+            // AniList is authoritative for status because anilistId is exact, whereas
+            // MangaUpdates title search is prone to false-positive matches (novels, old works, etc.).
             const live = await fetchLiveMangaInfo(item.title);
             if (live) {
               if (!chapters && live.chapters && live.chapters > 0) {
                 chapters = live.chapters;
-              }
-              if (
-                live.status &&
-                (live.status === "FINISHED" || live.status === "CANCELLED" || live.status === "HIATUS")
-              ) {
-                resolvedStatus = live.status;
               }
             }
 
@@ -139,12 +136,7 @@ async function runImport({
                     ? existing.totalChapters
                     : chapters;
 
-                // Don't overwrite an already FINISHED/CANCELLED status with RELEASING
-                const finalStatus =
-                  resolvedStatus === "RELEASING" &&
-                  (existing.status === "FINISHED" || existing.status === "CANCELLED")
-                    ? existing.status
-                    : resolvedStatus;
+                const finalStatus = resolvedStatus;
 
                 await prisma.media.update({
                   where: { id: existing.id },

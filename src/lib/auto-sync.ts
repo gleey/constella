@@ -62,12 +62,6 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
         if (!resolvedChapters && live.chapters && live.chapters > 0) {
           resolvedChapters = live.chapters;
         }
-        if (
-          live.status &&
-          (live.status === "FINISHED" || live.status === "CANCELLED" || live.status === "HIATUS")
-        ) {
-          resolvedStatus = live.status;
-        }
       }
 
       if (!resolvedChapters) {
@@ -93,7 +87,7 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
           title: detail.title,
           coverImage: detail.coverImage,
           totalChapters: resolvedChapters !== 100 ? resolvedChapters : undefined,
-          status: resolvedStatus !== "RELEASING" ? resolvedStatus : undefined,
+          status: resolvedStatus,
           contentRating: detail.contentRating,
           genres: detail.genres,
         },

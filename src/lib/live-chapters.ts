@@ -182,21 +182,10 @@ export async function syncMediaLiveChapters(mediaId: string): Promise<{ totalCha
     const live = await fetchLiveMangaInfo(media.title);
     if (!live) return { totalChapters: media.totalChapters, status: media.status };
 
-    const updateData: { totalChapters?: number; status?: string } = {};
+    const updateData: { totalChapters?: number } = {};
 
     if (live.chapters && live.chapters > 0 && live.chapters !== media.totalChapters) {
       updateData.totalChapters = live.chapters;
-    }
-
-    if (live.status && live.status !== media.status) {
-      if (
-        live.status === "FINISHED" ||
-        live.status === "CANCELLED" ||
-        live.status === "HIATUS" ||
-        media.status === "RELEASING"
-      ) {
-        updateData.status = live.status;
-      }
     }
 
     if (Object.keys(updateData).length > 0) {

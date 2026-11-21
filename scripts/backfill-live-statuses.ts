@@ -1,118 +1,94 @@
 /**
  * Backfill & Fix Media Release Statuses.
- * Uses MangaUpdates to accurately classify FINISHED, CANCELLED, and HIATUS media
- * that are currently mislabeled as RELEASING.
+ * Uses AniList (authoritative via anilistId) rather than MangaUpdates title search
+ * to prevent false positives (e.g. older completed works or novels with the same title).
  */
 
 import { prisma } from "../src/lib/prisma";
-import { fetchLiveMangaInfo } from "../src/lib/live-chapters";
+import { normalizeMediaStatus } from "../src/lib/anilist";
+
+const ANILIST_URL = "https://graphql.anilist.co";
+
+const BATCH_QUERY = `
+query ($ids: [Int]) {
+  Page(page: 1, perPage: 50) {
+    media(id_in: $ids, type: MANGA) {
+      id
+      status
+    }
+  }
+}
+`;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function run() {
-  console.log("=== Starting Media Status Backfill ===");
+  console.log("=== Starting Media Status Sync (from AniList) ===");
 
-  // 1. Explicit fix for Accel World:
-  // Link to manga adaptation ID 52993 (format MANGA, chapters 42, status FINISHED)
-  const accelWorld = await prisma.media.findFirst({
-    where: { title: { contains: "Accel World", mode: "insensitive" } },
-  });
-  if (accelWorld) {
-    console.log(`Fixing Accel World (${accelWorld.id})...`);
-    await prisma.media.update({
-      where: { id: accelWorld.id },
-      data: {
-        anilistId: 52993,
-        status: "FINISHED",
-        totalChapters: 42,
-      },
-    });
-    console.log("✓ Accel World updated to FINISHED, 42 chapters, anilistId 52993");
-  }
-
-  // 2. Query all remaining RELEASING media in DB
-  const releasingMedia = await prisma.media.findMany({
-    where: { status: "RELEASING" },
-    select: { id: true, title: true, totalChapters: true, status: true },
+  const allMedia = await prisma.media.findMany({
+    select: { id: true, anilistId: true, title: true, status: true },
     orderBy: { title: "asc" },
   });
 
-  console.log(`Found ${releasingMedia.length} media currently marked as RELEASING.`);
+  console.log(`Found ${allMedia.length} media records in DB.`);
 
-  let finishedCount = 0;
-  let cancelledCount = 0;
-  let hiatusCount = 0;
+  let updatedCount = 0;
   let unchangedCount = 0;
-  let errorCount = 0;
+  const chunkSize = 50;
 
-  const CONCURRENCY = 10;
-  for (let i = 0; i < releasingMedia.length; i += CONCURRENCY) {
-    const chunk = releasingMedia.slice(i, i + CONCURRENCY);
+  for (let i = 0; i < allMedia.length; i += chunkSize) {
+    const chunk = allMedia.slice(i, i + chunkSize);
+    const ids = chunk.map((m) => m.anilistId);
 
-    await Promise.all(
-      chunk.map(async (m) => {
-        try {
-          const live = await fetchLiveMangaInfo(m.title);
-          if (!live) {
-            unchangedCount++;
-            return;
-          }
+    try {
+      const res = await fetch(ANILIST_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: BATCH_QUERY, variables: { ids } }),
+      });
 
-          const updateData: { status?: string; totalChapters?: number } = {};
-
-          if (live.status && live.status !== "RELEASING") {
-            updateData.status = live.status;
-          }
-
-          if (live.chapters && live.chapters > 0 && live.chapters > m.totalChapters) {
-            updateData.totalChapters = live.chapters;
-          }
-
-          if (Object.keys(updateData).length > 0) {
-            await prisma.media.update({
-              where: { id: m.id },
-              data: updateData,
-            });
-
-            if (updateData.status === "FINISHED") {
-              finishedCount++;
-              console.log(`[FINISHED] "${m.title}" -> ${updateData.totalChapters ?? m.totalChapters} Ch.`);
-            } else if (updateData.status === "CANCELLED") {
-              cancelledCount++;
-              console.log(`[CANCELLED] "${m.title}"`);
-            } else if (updateData.status === "HIATUS") {
-              hiatusCount++;
-              console.log(`[HIATUS] "${m.title}"`);
-            } else if (updateData.totalChapters) {
-              console.log(`[CHAPTERS] "${m.title}" -> updated to ${updateData.totalChapters} Ch.`);
-            }
-          } else {
-            unchangedCount++;
-          }
-        } catch (err) {
-          errorCount++;
-          console.warn(`Error checking "${m.title}":`, err instanceof Error ? err.message : err);
+      if (!res.ok) {
+        if (res.status === 429) {
+          console.warn("Rate limited, waiting 30s...");
+          await sleep(30000);
+          i -= chunkSize;
+          continue;
         }
-      })
-    );
+        console.warn(`Batch failed with HTTP ${res.status}`);
+        continue;
+      }
 
-    // Polite delay between batches to respect MangaUpdates
-    await sleep(200);
+      const json = await res.json();
+      const anilistList: Array<{ id: number; status?: string }> = json.data?.Page?.media || [];
 
-    const progress = Math.min(i + CONCURRENCY, releasingMedia.length);
-    if (progress % 30 === 0 || progress === releasingMedia.length) {
-      console.log(`Progress: ${progress}/${releasingMedia.length} processed...`);
+      for (const a of anilistList) {
+        const dbItem = chunk.find((c) => c.anilistId === a.id);
+        if (!dbItem) continue;
+
+        const authoritativeStatus = normalizeMediaStatus(a.status);
+        if (dbItem.status !== authoritativeStatus) {
+          await prisma.media.update({
+            where: { id: dbItem.id },
+            data: { status: authoritativeStatus },
+          });
+          console.log(`[STATUS] "${dbItem.title}": ${dbItem.status} -> ${authoritativeStatus}`);
+          updatedCount++;
+        } else {
+          unchangedCount++;
+        }
+      }
+
+      await sleep(350);
+    } catch (err) {
+      console.warn("Batch error:", err);
     }
   }
 
-  console.log("\n=== Backfill Summary ===");
-  console.log(`FINISHED: ${finishedCount}`);
-  console.log(`CANCELLED: ${cancelledCount}`);
-  console.log(`HIATUS: ${hiatusCount}`);
-  console.log(`UNCHANGED (Still Releasing): ${unchangedCount}`);
-  console.log(`Errors: ${errorCount}`);
+  console.log("\n=== Summary ===");
+  console.log(`Updated: ${updatedCount}`);
+  console.log(`Unchanged: ${unchangedCount}`);
 }
 
 run()
