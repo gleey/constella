@@ -63,6 +63,11 @@ const KNOWN_WIKI_SUBDOMAINS: Record<string, string> = {
   "god of blackfield": "vsbattles#God_of_Blackfield",
   "legend of an asura the poison dragon": "asurascans#Legend_of_Asura_–_The_Venom_Dragon",
   "legend of asura the venom dragon": "asurascans#Legend_of_Asura_–_The_Venom_Dragon",
+  // ── Manga overrides (verified dedicated wikis or confirmed null) ──
+  "assassination classroom": "ansatsu-kyoushitsu",
+  "the 100 girlfriends who really really really really really love you": "100kanojo",
+  "100 girlfriends": "100kanojo",
+  "yamada kun and the seven witches": "yamada-kun",
 };
 
 /**
@@ -130,6 +135,14 @@ export async function probeHubWikis(
         const normTarget = normalize(t);
         for (const match of matches) {
           const normM = normalize(match);
+
+          // Reject character/episode pages — on VSBattles, character pages look like
+          // "Shiro (Classroom of the Elite)" which are NOT series overview pages.
+          // Accept only if the match is a direct series title match or contains "(Verse)".
+          const parenContent = match.match(/\(([^)]+)\)$/)?.[1]?.toLowerCase() || "";
+          const isCharacterPage = parenContent && !parenContent.includes("verse") && !parenContent.includes("series");
+          if (isCharacterPage) continue;
+
           if (
             normM === normTarget ||
             (normTarget.length >= 6 && normM.includes(normTarget)) ||
@@ -378,9 +391,31 @@ export async function resolveFandomWikiSubdomain(
       if (res.ok) {
         const json = await res.json();
         if (json?.query?.general?.sitename) {
+          const sitename: string = json.query.general.sitename || "";
           const articles = json?.query?.statistics?.articles || 0;
           // Skip tiny unrelated wikis for short acronym candidates
           if (cand.length <= 3 && articles < 15) continue;
+
+          // Relevance check: verify the wiki sitename or mainpage relates to the series title.
+          // This prevents false positives like "ac" (Assassin's Creed) for "Assassination Classroom",
+          // "ge" (Greninja) for "Goodbye Eri", "moe" (Moe genre) for "Memories of Emanon", etc.
+          const mainpage: string = json.query.general.mainpage || "";
+          const sitenameLower = sitename.toLowerCase();
+          const titleTokens = toSlug(seriesTitle).split("-").filter((t) => t.length > 2);
+          const candTokens = cand.split("-").filter((t) => t.length > 2);
+
+          // Check if sitename or mainpage contains a meaningful token from the title or candidate
+          const isRelevant =
+            titleTokens.some((t) => sitenameLower.includes(t) || mainpage.toLowerCase().includes(t)) ||
+            candTokens.some((t) => sitenameLower.includes(t) || mainpage.toLowerCase().includes(t)) ||
+            sitenameLower.includes(toSlug(seriesTitle)) ||
+            toSlug(seriesTitle).includes(sitenameLower.replace(/\s+/g, "-"));
+
+          // For short acronyms (<= 4 chars), require strict relevance — the sitename must contain
+          // a token from the title to avoid matching large unrelated wikis (e.g. "ac" → Assassin's Creed)
+          if (cand.length <= 4 && !isRelevant) continue;
+
+          // For longer candidates, allow if it's a big wiki but still prefer relevant ones
           if (articles > maxArticles) {
             maxArticles = articles;
             bestCand = cand;

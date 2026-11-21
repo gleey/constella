@@ -13,16 +13,8 @@ interface MediaCoverage {
   relationshipCount: number;
 }
 
-interface Stats {
-  total: number;
-  tier3: number;
-  tier2: number;
-  tier1: number;
-}
-
 interface StatusClientProps {
   initialMedia: MediaCoverage[];
-  stats: Stats;
 }
 
 function getTier(media: MediaCoverage): "tier3" | "tier2" | "tier1" {
@@ -37,15 +29,24 @@ const TIER_LABELS = {
   tier1: "Tier 1 — Metadata Saja",
 } as const;
 
+const TIER_SHORT = {
+  tier3: "Tier 3",
+  tier2: "Tier 2",
+  tier1: "Tier 1",
+} as const;
+
 const TIER_BADGE_STYLE = {
   tier3: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
   tier2: "bg-amber-500/15 text-amber-300 border-amber-500/30",
   tier1: "bg-slate-500/15 text-slate-300 border-slate-500/30",
 } as const;
 
-export default function StatusClient({ initialMedia, stats }: StatusClientProps) {
+const PAGE_SIZE = 24;
+
+export default function StatusClient({ initialMedia }: StatusClientProps) {
   const [filter, setFilter] = useState<"all" | "tier3" | "tier2" | "tier1">("all");
   const [search, setSearch] = useState("");
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
 
   const filteredMedia = useMemo(() => {
     return initialMedia.filter((m) => {
@@ -57,6 +58,20 @@ export default function StatusClient({ initialMedia, stats }: StatusClientProps)
     });
   }, [initialMedia, filter, search]);
 
+  const displayedMedia = useMemo(() => {
+    return filteredMedia.slice(0, visibleCount);
+  }, [filteredMedia, visibleCount]);
+
+  const handleFilterChange = (f: "all" | "tier3" | "tier2" | "tier1") => {
+    setFilter(f);
+    setVisibleCount(PAGE_SIZE);
+  };
+
+  const handleSearchChange = (v: string) => {
+    setSearch(v);
+    setVisibleCount(PAGE_SIZE);
+  };
+
   return (
     <div className="mt-10 space-y-6">
       {/* Filter & Search */}
@@ -67,7 +82,7 @@ export default function StatusClient({ initialMedia, stats }: StatusClientProps)
             <button
               key={f}
               type="button"
-              onClick={() => setFilter(f as typeof filter)}
+              onClick={() => handleFilterChange(f as typeof filter)}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
                 filter === f
                   ? f === "all"
@@ -76,7 +91,7 @@ export default function StatusClient({ initialMedia, stats }: StatusClientProps)
                   : "bg-white/5 hover:bg-white/10 text-slate-300 ring-1 ring-white/10"
               }`}
             >
-              {f === "all" ? "Semua" : TIER_LABELS[f as keyof typeof TIER_LABELS]}
+              {f === "all" ? "Semua" : TIER_SHORT[f as keyof typeof TIER_SHORT]}
             </button>
           ))}
         </div>
@@ -96,7 +111,7 @@ export default function StatusClient({ initialMedia, stats }: StatusClientProps)
           <input
             type="search"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Cari judul..."
             className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#111827] border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 text-sm"
           />
@@ -105,8 +120,8 @@ export default function StatusClient({ initialMedia, stats }: StatusClientProps)
 
       {/* Results count */}
       <p className="text-sm text-slate-400">
-        Menampilkan <span className="text-white font-semibold">{filteredMedia.length}</span> dari{" "}
-        <span className="text-white font-semibold">{stats.total}</span> seri
+        Menampilkan <span className="text-white font-semibold">{displayedMedia.length}</span> dari{" "}
+        <span className="text-white font-semibold">{filteredMedia.length}</span> seri
         {filter !== "all" && (
           <>
             &nbsp;|&nbsp;
@@ -125,8 +140,8 @@ export default function StatusClient({ initialMedia, stats }: StatusClientProps)
           </p>
           <button
             onClick={() => {
-              setFilter("all");
-              setSearch("");
+              handleFilterChange("all");
+              handleSearchChange("");
             }}
             className="px-5 py-2.5 rounded-full bg-indigo-500/15 text-[#a5b4fc] text-xs font-semibold ring-1 ring-indigo-500/40 hover:bg-indigo-500/25 transition cursor-pointer"
           >
@@ -134,85 +149,104 @@ export default function StatusClient({ initialMedia, stats }: StatusClientProps)
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredMedia.map((m) => {
-            const tier = getTier(m);
-            return (
-              <Link
-                key={m.id}
-                href={`/media/${m.id}`}
-                className="group flex flex-col rounded-2xl overflow-hidden bg-[#111827] ring-1 ring-white/5 hover:ring-indigo-500/50 hover:-translate-y-0.5 transition-all duration-300 shadow-lg shadow-black/40"
-              >
-                {/* Cover */}
-                <div className="relative w-full aspect-[3/4] bg-[#161f30] overflow-hidden">
-                  {m.coverImage ? (
-                    <Image
-                      src={m.coverImage}
-                      alt={m.title}
-                      fill
-                      className="object-cover group-hover:scale-105 transition-transform duration-500"
-                      unoptimized
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">
-                      No Cover
-                    </div>
-                  )}
-                  <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0b0f19]/80 to-transparent" />
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {displayedMedia.map((m) => {
+              const tier = getTier(m);
+              return (
+                <Link
+                  key={m.id}
+                  href={`/media/${m.id}`}
+                  className="group flex flex-col rounded-2xl overflow-hidden bg-[#111827] ring-1 ring-white/5 hover:ring-indigo-500/50 hover:-translate-y-0.5 transition-all duration-300 shadow-lg shadow-black/40"
+                >
+                  {/* Cover */}
+                  <div className="relative w-full aspect-[3/4] bg-[#161f30] overflow-hidden">
+                    {m.coverImage ? (
+                      <Image
+                        src={m.coverImage}
+                        alt={m.title}
+                        fill
+                        className="object-cover group-hover:scale-105 transition-transform duration-500"
+                        unoptimized
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">
+                        No Cover
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0b0f19]/80 to-transparent" />
 
-                  {/* Tier Badge */}
-                  <div className="absolute top-2.5 left-2.5">
-                    <span
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide ring-1 backdrop-blur-md ${
-                        TIER_BADGE_STYLE[tier]
-                      }`}
-                    >
-                      {TIER_LABELS[tier]}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Info */}
-                <div className="p-4 flex-1 flex flex-col justify-between space-y-3 min-h-[120px]">
-                  <div>
-                    <h3 className="text-sm font-bold text-white group-hover:text-[#a5b4fc] transition-colors line-clamp-1">
-                      {m.title}
-                    </h3>
-                    <div className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-400">
-                      <span>{m.totalChapters} Ch.</span>
-                      <span aria-hidden>·</span>
-                      <span className="font-mono text-[10px] text-slate-500">
-                        {m.characterCount} Karakter
+                    {/* Tier Badge */}
+                    <div className="absolute top-2.5 left-2.5">
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide ring-1 backdrop-blur-md ${
+                          TIER_BADGE_STYLE[tier]
+                        }`}
+                      >
+                        {TIER_SHORT[tier]}
                       </span>
-                      {m.relationshipCount > 0 && (
-                        <>
-                          <span aria-hidden>·</span>
-                          <span className="font-mono text-[10px] text-emerald-400 font-semibold">
-                            {m.relationshipCount} Relasi
-                          </span>
-                        </>
-                      )}
                     </div>
                   </div>
 
-                  <div className="pt-2.5 border-t border-white/5 flex items-center justify-between text-xs font-semibold text-[#a5b4fc]">
-                    <span>Buka Graph</span>
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform"
-                      aria-hidden="true"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                    </svg>
+                  {/* Info */}
+                  <div className="p-4 flex-1 flex flex-col justify-between space-y-3 min-h-[120px]">
+                    <div>
+                      <h3 className="text-sm font-bold text-white group-hover:text-[#a5b4fc] transition-colors line-clamp-1">
+                        {m.title}
+                      </h3>
+                      <div className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-400">
+                        <span>{m.totalChapters} Ch.</span>
+                        <span aria-hidden>·</span>
+                        <span className="font-mono text-[10px] text-slate-500">
+                          {m.characterCount} Karakter
+                        </span>
+                        {m.relationshipCount > 0 && (
+                          <>
+                            <span aria-hidden>·</span>
+                            <span className="font-mono text-[10px] text-emerald-400 font-semibold">
+                              {m.relationshipCount} Relasi
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-2.5 border-t border-white/5 flex items-center justify-between text-xs font-semibold text-[#a5b4fc]">
+                      <span>Buka Graph</span>
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform"
+                        aria-hidden="true"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                      </svg>
+                    </div>
                   </div>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
+                </Link>
+              );
+            })}
+          </div>
+
+          {/* Show More Button */}
+          {filteredMedia.length > visibleCount && (
+            <div className="mt-10 flex flex-col items-center justify-center gap-3">
+              <p className="text-xs text-slate-400 font-medium">
+                Menampilkan <span className="text-white font-bold">{displayedMedia.length}</span> dari{" "}
+                <span className="text-white font-bold">{filteredMedia.length}</span> seri
+              </p>
+              <button
+                type="button"
+                onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+                className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-950/50 hover:shadow-indigo-500/25 ring-1 ring-white/10 transition-all cursor-pointer flex items-center gap-2"
+              >
+                <span>Tampilkan Lebih Banyak</span>
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

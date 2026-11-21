@@ -62,15 +62,27 @@ export default async function MethodologyPage() {
           {paragraphs.map((paragraph, index) => {
             // Check if paragraph is a section header like "1. Two-Layer Zero-Spoiler Guarantee"
             const isHeader = /^[0-9]+\.\s+/.test(paragraph);
+            const isBullet = paragraph.trim().startsWith("- ");
             return (
-              <div key={index} className={isHeader ? "pt-4" : ""}>
+              <div key={index} className={isHeader ? "pt-6" : ""}>
                 {isHeader ? (
-                  <h2 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                    <span className="text-indigo-400">{paragraph.split(" ")[0]}</span>
+                  <h2 className="text-lg font-bold text-white mb-3 flex items-center gap-2.5">
+                    <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 text-sm font-bold ring-1 ring-indigo-500/25">
+                      {paragraph.split(" ")[0].replace(".", "")}
+                    </span>
                     <span>{paragraph.replace(/^[0-9]+\.\s+/, "")}</span>
                   </h2>
+                ) : isBullet ? (
+                  <ul className="space-y-2 mt-2">
+                    {paragraph.split("\n").filter((l) => l.trim().startsWith("- ")).map((line, i) => (
+                      <li key={i} className="flex items-start gap-2.5 text-sm text-slate-400 leading-relaxed">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400/70 shrink-0" />
+                        <span>{line.trim().replace(/^-\s+/, "")}</span>
+                      </li>
+                    ))}
+                  </ul>
                 ) : (
-                  <p className="whitespace-pre-line leading-relaxed text-slate-300">
+                  <p className="whitespace-pre-line leading-relaxed text-slate-300 text-sm">
                     {paragraph}
                   </p>
                 )}
@@ -89,11 +101,11 @@ export default async function MethodologyPage() {
             </span>
             <div>
               <h3 className="text-sm font-bold text-white">Zero Leakage Verification</h3>
-              <p className="text-xs text-slate-400">Deterministic regression tested via automated test suites</p>
+              <p className="text-xs text-slate-400">Diterapkan via deterministic server-side filtering di PostgreSQL</p>
             </div>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
-            Our test suites (<code className="text-indigo-300 font-mono">tests/graph.test.ts</code>) simulate edge cases where users seek future nodes in earlier chapters. The API enforces strict 404/empty responses for temporal out-of-bound requests.
+            Setiap query karakter dan relasi difilter secara deterministik di tingkat database PostgreSQL menggunakan batas <code className="text-indigo-300 font-mono">validFrom</code> dan <code className="text-indigo-300 font-mono">validUntil</code> chapter. Data bab mendatang tidak pernah dikirim ke client, membuat inspeksi elemen (inspect-element) tidak dapat membocorkan spoiler.
           </p>
           <div className="pt-2 flex items-center gap-3">
             <Link

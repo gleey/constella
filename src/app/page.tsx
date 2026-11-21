@@ -1096,27 +1096,13 @@ export default function HomePage() {
                   Menampilkan <span className="text-white font-bold">{displayedMedia.length}</span> dari{" "}
                   <span className="text-white font-bold">{filteredMedia.length}</span> cerita
                 </p>
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
-                    className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-950/50 hover:shadow-indigo-500/25 ring-1 ring-white/10 transition-all cursor-pointer flex items-center gap-2"
-                  >
-                    <span>Tampilkan Lebih Banyak</span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-white/20 text-white font-mono">
-                      +{Math.min(PAGE_SIZE, filteredMedia.length - visibleCount)}
-                    </span>
-                  </button>
-                  {filteredMedia.length > visibleCount + PAGE_SIZE && (
-                    <button
-                      type="button"
-                      onClick={() => setVisibleCount(filteredMedia.length)}
-                      className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-sm font-medium ring-1 ring-white/10 transition cursor-pointer"
-                    >
-                      Tampilkan Semua ({filteredMedia.length})
-                    </button>
-                  )}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+                  className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-950/50 hover:shadow-indigo-500/25 ring-1 ring-white/10 transition-all cursor-pointer flex items-center gap-2"
+                >
+                  <span>Tampilkan Lebih Banyak</span>
+                </button>
               </div>
             )}
           </>

@@ -162,7 +162,6 @@ export default async function StatusPage() {
         {/* Client-side Filter/Search Component */}
         <StatusClient
           initialMedia={mediaWithCoverage}
-          stats={stats}
         />
       </div>
     </div>
