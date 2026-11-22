@@ -137,17 +137,48 @@ export async function probeHubWikis(
           const normM = normalize(match);
 
           // Reject character/episode pages — on VSBattles, character pages look like
-          // "Shiro (Classroom of the Elite)" which are NOT series overview pages.
-          // Accept only if the match is a direct series title match or contains "(Verse)".
+          // "Shiro (Classroom of the Elite)" or "Helmut Zemo (Marvel Cinematic Universe)"
+          // which are NOT series overview pages.
           const parenContent = match.match(/\(([^)]+)\)$/)?.[1]?.toLowerCase() || "";
-          const isCharacterPage = parenContent && !parenContent.includes("verse") && !parenContent.includes("series");
-          if (isCharacterPage) continue;
 
-          if (
-            normM === normTarget ||
-            (normTarget.length >= 6 && normM.includes(normTarget)) ||
-            (normM.length >= 6 && normTarget.includes(normM))
-          ) {
+          // On VSBattles specifically, be extra strict:
+          // Only accept pages that are clearly series/franchise pages (have "(Verse)" suffix)
+          // OR are exact title matches for long titles (>= 10 chars) without any parenthetical suffix.
+          // Short single-word titles like "Shark", "Helmut", "Passion" almost always match unrelated characters.
+          if (hub === "vsbattles") {
+            // Use word-boundary check to avoid "universe" matching "verse"
+            const isVersePage = /\bverse\b/.test(parenContent);
+            const isLongExact = normM === normTarget && normTarget.length >= 10 && !parenContent;
+            if (!isVersePage && !isLongExact) continue;
+          } else {
+            // For non-VSBattles hubs, reject character pages with parenthetical suffixes
+            const isCharacterPage = parenContent && !/\bverse\b/.test(parenContent) && !parenContent.includes("series");
+            if (isCharacterPage) continue;
+
+            // For short or single-word titles (<= 10 chars, no space), skip hub matching entirely.
+            // Single-word titles like "Happiness", "PASSION", "Shark" are too ambiguous on
+            // multi-series hub wikis — they frequently match unrelated series with the same name.
+            if (normTarget.length <= 10 && !t.includes(" ")) continue;
+          }
+
+          // Strict matching to prevent false positives:
+          // 1. Exact match (normalized) — e.g. "God of Blackfield" === "God of Blackfield"
+          // 2. For VSBattles, accept "(Verse)" suffix matches — e.g. "Dorohedoro (Verse)"
+          // 3. For titles >= 10 chars, allow substring match only if the match title
+          //    is NOT a character name from a different franchise.
+          //    This prevents "orange" → "ORANGE_MARMALADE" and "Shark" → "Shark" false positives.
+          const isExact = normM === normTarget;
+          const isVerseMatch = /\bverse\b/.test(parenContent) && normM.replace(parenContent, "").includes(normTarget);
+
+          // For long titles (>= 10 chars), allow fuzzy match only if target is fully contained
+          // in the match AND the match doesn't look like a character from another franchise
+          const isLongMatch =
+            normTarget.length >= 10 &&
+            normM.includes(normTarget) &&
+            // Reject if match is much longer than target (likely a different series)
+            normM.length <= normTarget.length + 15;
+
+          if (isExact || isVerseMatch || isLongMatch) {
             return `${hub}#${match.replace(/\s+/g, "_")}`;
           }
         }
@@ -191,6 +222,82 @@ export async function resolveWikiFileUrl(
   } catch {
     return null;
   }
+}
+
+/**
+ * Verify that a Fandom wiki actually contains content about the given series.
+ * Checks whether the wiki has a Category:Characters page or a page matching the series title.
+ * This prevents false positives where a wiki subdomain exists but is about an unrelated topic.
+ */
+async function verifyWikiHasSeriesContent(
+  subdomain: string,
+  seriesTitle: string,
+  synonyms: string[] = []
+): Promise<boolean> {
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const normTitle = normalize(seriesTitle);
+  if (!normTitle) return false;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    // Check if Category:Characters exists on this wiki (strong indicator of a manga/manhwa wiki)
+    const params = new URLSearchParams({
+      action: "query",
+      titles: "Category:Characters",
+      format: "json",
+    });
+    const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
+      headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) return false;
+    const json = await res.json();
+    const pages = json?.query?.pages || {};
+    const hasCategoryCharacters = Object.values(pages).some(
+      (p: unknown) => {
+        const page = p as { missing?: boolean; title?: string };
+        return !page.missing && page.title === "Category:Characters";
+      }
+    );
+
+    if (hasCategoryCharacters) return true;
+
+    // Also check if a page matching the series title exists
+    const titlesToCheck = [seriesTitle, ...synonyms].filter(Boolean).slice(0, 3);
+    for (const t of titlesToCheck) {
+      try {
+        const pageParams = new URLSearchParams({
+          action: "query",
+          titles: t,
+          redirects: "1",
+          format: "json",
+        });
+        const pageRes = await fetch(`${apiUrl(subdomain)}?${pageParams}`, {
+          headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+        });
+        if (!pageRes.ok) continue;
+        const pageJson = await pageRes.json();
+        const pageObj = pageJson?.query?.pages || {};
+        const pageExists = Object.values(pageObj).some(
+          (p: unknown) => {
+            const page = p as { missing?: boolean };
+            return !page.missing;
+          }
+        );
+        if (pageExists) return true;
+      } catch {
+        // continue
+      }
+    }
+  } catch {
+    // If verification fails, assume not relevant
+  }
+
+  return false;
 }
 
 /**
@@ -374,6 +481,7 @@ export async function resolveFandomWikiSubdomain(
 
   let bestCand: string | null = null;
   let maxArticles = -1;
+  let bestVerified = false;
 
   for (const cand of uniqueCandidates) {
     try {
@@ -397,8 +505,6 @@ export async function resolveFandomWikiSubdomain(
           if (cand.length <= 3 && articles < 15) continue;
 
           // Relevance check: verify the wiki sitename or mainpage relates to the series title.
-          // This prevents false positives like "ac" (Assassin's Creed) for "Assassination Classroom",
-          // "ge" (Greninja) for "Goodbye Eri", "moe" (Moe genre) for "Memories of Emanon", etc.
           const mainpage: string = json.query.general.mainpage || "";
           const sitenameLower = sitename.toLowerCase();
           const titleTokens = toSlug(seriesTitle).split("-").filter((t) => t.length > 2);
@@ -415,12 +521,29 @@ export async function resolveFandomWikiSubdomain(
           // a token from the title to avoid matching large unrelated wikis (e.g. "ac" → Assassin's Creed)
           if (cand.length <= 4 && !isRelevant) continue;
 
-          // For longer candidates, allow if it's a big wiki but still prefer relevant ones
+          // For longer candidates that pass relevance, also do content-based verification
+          // to ensure the wiki actually has manga/manhwa content about this series
+          const isVerified = isRelevant
+            ? await verifyWikiHasSeriesContent(cand, seriesTitle, synonyms)
+            : articles > 500; // big wikis get benefit of the doubt if relevant
+
+          // Prefer verified results over unverified ones
+          if (isVerified && !bestVerified) {
+            // This is the first verified result — take it immediately
+            bestCand = cand;
+            maxArticles = articles;
+            bestVerified = true;
+            continue;
+          }
+
+          // If we already have a verified result, only replace with another verified one that's bigger
+          if (bestVerified && !isVerified) continue;
+
           if (articles > maxArticles) {
             maxArticles = articles;
             bestCand = cand;
             // If it's a huge established wiki (> 500 articles), accept immediately
-            if (articles > 500) {
+            if (articles > 500 && isVerified) {
               break;
             }
           }
