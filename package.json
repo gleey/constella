@@ -11,7 +11,8 @@
     "sync:daemon": "npx tsx scripts/run-background-daemon.ts",
     "sync:catalog": "npx tsx scripts/sync-catalog-continuous.ts",
     "sync:ongoing": "npx tsx scripts/sync-catalog-continuous.ts --ongoingOnly",
-    "sync:repair": "npx tsx scripts/sync-all-live-images.ts"
+    "sync:repair": "npx tsx scripts/sync-all-live-images.ts",
+    "sync:lore:global": "npx tsx scripts/run-global-lore-sync.ts"
   },
   "dependencies": {
     "@google/genai": "^2.23.0",

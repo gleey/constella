@@ -14,6 +14,39 @@ export interface LiveMangaData {
 const liveMangaCache = new Map<string, { data: LiveMangaData; timestamp: number }>();
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
+/**
+ * MangaUpdates circuit breaker.
+ *
+ * The API sits behind an nginx proxy that answers 504 after a 60s gateway
+ * timeout when the upstream is unhealthy. A catalog sync touches hundreds of
+ * titles, so without a breaker a single outage stalls the whole run for
+ * hours. After a few consecutive failures we stop calling it for a cooldown
+ * and fall back to Kitsu (which is a separate host and stays up).
+ */
+const MU_FAILURE_THRESHOLD = 3;
+const MU_COOLDOWN_MS = 10 * 60 * 1000;
+let muConsecutiveFailures = 0;
+let muDisabledUntil = 0;
+
+function mangaUpdatesAvailable(): boolean {
+  return Date.now() >= muDisabledUntil;
+}
+
+function noteMangaUpdatesFailure(): void {
+  muConsecutiveFailures += 1;
+  if (muConsecutiveFailures >= MU_FAILURE_THRESHOLD) {
+    muDisabledUntil = Date.now() + MU_COOLDOWN_MS;
+    muConsecutiveFailures = 0;
+    console.warn(
+      `[live-chapters] MangaUpdates unreachable ${MU_FAILURE_THRESHOLD}× — disabling for ${MU_COOLDOWN_MS / 60000} min, falling back to Kitsu.`,
+    );
+  }
+}
+
+function noteMangaUpdatesSuccess(): void {
+  muConsecutiveFailures = 0;
+}
+
 function requestIPv4(url: string, options: { method?: string; body?: string; headers?: Record<string, string> } = {}) {
   return new Promise<{ ok: boolean; status: number; json: () => Promise<any> }>((resolve, reject) => {
     const u = new URL(url);
@@ -239,6 +272,8 @@ export async function fetchLiveMangaInfo(
   }
 
   // 2. MangaUpdates — the reliable chapter count for ongoing series.
+  //    Skipped entirely while the circuit breaker is open (API outage).
+  if (mangaUpdatesAvailable()) {
   try {
     const forms = [normalizedTitle, ...titleForms]
       .map((t) =>
@@ -257,7 +292,12 @@ export async function fetchLiveMangaInfo(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ search: form, stype: "title" }),
       });
-      if (!searchRes.ok) continue;
+      if (!searchRes.ok) {
+        // 502/504 means the upstream is down — that is an outage, not a miss.
+        noteMangaUpdatesFailure();
+        if (!mangaUpdatesAvailable()) break;
+        continue;
+      }
 
       const searchData = await searchRes.json();
       const results = searchData?.results || [];
@@ -275,6 +315,7 @@ export async function fetchLiveMangaInfo(
         const detail = await detailRes.json();
         const chapters = parseChapterFromDetail(detail);
         const status = parseStatusFromDetail(detail) ?? kitsuStatus;
+        noteMangaUpdatesSuccess();
         const data: LiveMangaData = {
           chapters: chapters ?? kitsuChapters,
           status,
@@ -282,12 +323,18 @@ export async function fetchLiveMangaInfo(
         liveMangaCache.set(cacheKey, { data, timestamp: Date.now() });
         return data;
       }
+      noteMangaUpdatesFailure();
+    } else {
+      // A search that returns no usable record is a miss, not an outage.
+      noteMangaUpdatesSuccess();
     }
   } catch (err) {
+    noteMangaUpdatesFailure();
     console.warn(
       `[live-chapters] MangaUpdates lookup failed for "${title}":`,
       err instanceof Error ? err.message : err,
     );
+  }
   }
 
   // 3. Kitsu only.

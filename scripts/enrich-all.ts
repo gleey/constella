@@ -223,12 +223,14 @@ async function enrichMedia(config: SeriesMapping) {
   const allNamesList = dbCharacters.map((c) => c.name);
 
   // 2. Process priority characters via Fandom + Gemini
-  // Fallback global: seri tanpa override → proses 15 karakter pertama.
+  // Fallback global: seri tanpa override → proses karakter pertama.
   // Tidak ada skip berdasarkan lore lama — setiap run mengekstrak ulang dan
   // menimpa hasil sebelumnya, jadi lore yang salah tidak pernah menetap.
   let priorityNames = config.mainCharacters;
   if (priorityNames.length === 0) {
-    priorityNames = dbCharacters.slice(0, 15).map((c) => c.name);
+    const limitArg = process.argv.find((a) => a.startsWith("--limit="));
+    const autoLimit = limitArg ? Math.max(1, parseInt(limitArg.split("=")[1], 10) || 15) : 15;
+    priorityNames = dbCharacters.slice(0, autoLimit).map((c) => c.name);
     console.log(`[AUTO] Seri "${media.title}" tanpa override → auto-pilih ${priorityNames.length} karakter untuk pengayaan.`);
   }
   for (const charName of priorityNames) {
