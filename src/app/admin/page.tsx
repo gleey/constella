@@ -100,6 +100,7 @@ export default function AdminPage() {
   const [deletingMediaId, setDeletingMediaId] = useState<string | null>(null);
 
   // Editable site pages (About)
+  const [pageSlug, setPageSlug] = useState<"about" | "methodology">("about");
   const [pageTitle, setPageTitle] = useState("");
   const [pageContent, setPageContent] = useState("");
   const [pageStatus, setPageStatus] = useState<string | null>(null);
@@ -230,33 +231,34 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, [bgStatus?.isRunning]);
 
-  // Load editable page content when the Pages tab is opened
+  // Load editable page content when the Pages tab is opened or the selected
+  // page (about / methodology) changes.
   useEffect(() => {
     if (activeTab !== "pages") return;
     setLoadingPage(true);
     setPageStatus(null);
-    fetch("/api/pages/about")
+    fetch(`/api/pages/${pageSlug}`)
       .then((r) => r.json())
       .then((data) => {
-        setPageTitle(data.title ?? "About Constella");
+        setPageTitle(data.title ?? "");
         setPageContent(data.content ?? "");
       })
       .catch(() => setPageStatus("Failed to load page content."))
       .finally(() => setLoadingPage(false));
-  }, [activeTab]);
+  }, [activeTab, pageSlug]);
 
   const handleSavePage = async () => {
     setSavingPage(true);
     setPageStatus(null);
     try {
-      const res = await fetch("/api/pages/about", {
+      const res = await fetch(`/api/pages/${pageSlug}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: pageTitle, content: pageContent }),
       });
       const data = await res.json();
       if (res.ok) {
-        setPageStatus("Saved. The About page is updated.");
+        setPageStatus(`Saved. The ${pageSlug === "about" ? "About" : "Methodology"} page is updated.`);
       } else {
         setPageStatus(`Save failed: ${data.error}`);
       }
@@ -1450,10 +1452,26 @@ export default function AdminPage() {
             </div>
 
             <div className="rounded-2xl bg-white/[0.03] p-5 ring-1 ring-white/10 space-y-4">
+              <div className="flex items-center gap-2">
+                {(["about", "methodology"] as const).map((slug) => (
+                  <button
+                    key={slug}
+                    onClick={() => setPageSlug(slug)}
+                    className={`px-4 py-1.5 rounded-full text-xs font-semibold capitalize transition-colors ${
+                      pageSlug === slug
+                        ? "bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-500/40"
+                        : "bg-white/5 text-slate-400 ring-1 ring-white/10 hover:bg-white/10 hover:text-slate-200"
+                    }`}
+                  >
+                    {slug}
+                  </button>
+                ))}
+              </div>
+
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-white">About page</h3>
-                  <p className="text-xs text-slate-500">Shown at /about</p>
+                  <h3 className="text-sm font-semibold text-white capitalize">{pageSlug} page</h3>
+                  <p className="text-xs text-slate-500">Shown at /{pageSlug}</p>
                 </div>
                 {pageStatus && (
                   <span
@@ -1507,7 +1525,9 @@ export default function AdminPage() {
                   {savingPage ? "Saving..." : "Save page"}
                 </button>
                 <span className="text-xs text-slate-500">
-                  {loadingPage ? "Loading current content..." : "Public About page updates on save."}
+                  {loadingPage
+                    ? "Loading current content..."
+                    : `Public ${pageSlug === "about" ? "About" : "Methodology"} page updates on save.`}
                 </span>
               </div>
             </div>

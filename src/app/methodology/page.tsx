@@ -22,10 +22,61 @@ export default async function MethodologyPage() {
     console.error("Failed to load methodology page:", error);
   }
 
-  const paragraphs = page.content
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
+  // Parse content line-by-line so a numbered section header never swallows the
+  // body text that follows it. Three block types:
+  //   1. Header  — a line starting with "N. "  → numbered section <h2>
+  //   2. Bullets — consecutive lines starting with "- " → <ul>
+  //   3. Text    — everything else → <p>
+  type Block =
+    | { kind: "header"; num: string; text: string }
+    | { kind: "bullets"; items: string[] }
+    | { kind: "text"; text: string };
+
+  const blocks: Block[] = [];
+  {
+    const lines = page.content.split("\n");
+    let i = 0;
+    while (i < lines.length) {
+      const raw = lines[i];
+      const line = raw.trim();
+      i++;
+
+      if (!line) continue;
+
+      const headerMatch = line.match(/^([0-9]+)\.\s+(.+)$/);
+      if (headerMatch) {
+        blocks.push({ kind: "header", num: headerMatch[1], text: headerMatch[2] });
+        continue;
+      }
+
+      if (line.startsWith("- ")) {
+        const items: string[] = [];
+        // Consume this and any consecutive bullet lines
+        let j = i - 1;
+        while (j < lines.length && lines[j].trim().startsWith("- ")) {
+          items.push(lines[j].trim().replace(/^-\s+/, ""));
+          j++;
+        }
+        i = j; // skip past the consumed bullet lines
+        blocks.push({ kind: "bullets", items });
+        continue;
+      }
+
+      // Plain paragraph: merge consecutive non-empty, non-structural lines so
+      // authors can soft-wrap without creating multiple paragraphs.
+      const textLines = [line];
+      while (
+        i < lines.length &&
+        lines[i].trim() &&
+        !lines[i].trim().startsWith("- ") &&
+        !/^[0-9]+\.\s+/.test(lines[i].trim())
+      ) {
+        textLines.push(lines[i].trim());
+        i++;
+      }
+      blocks.push({ kind: "text", text: textLines.join(" ") });
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#0b0f19] aurora text-slate-100">
@@ -59,34 +110,39 @@ export default async function MethodologyPage() {
         </h1>
 
         <div className="mt-8 space-y-6 text-[15px] leading-7 text-slate-300">
-          {paragraphs.map((paragraph, index) => {
-            // Check if paragraph is a section header like "1. Two-Layer Zero-Spoiler Guarantee"
-            const isHeader = /^[0-9]+\.\s+/.test(paragraph);
-            const isBullet = paragraph.trim().startsWith("- ");
+          {blocks.map((block, index) => {
+            if (block.kind === "header") {
+              return (
+                <h2
+                  key={index}
+                  className="pt-6 text-lg font-bold text-white flex items-center gap-2.5"
+                >
+                  <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 text-sm font-bold ring-1 ring-indigo-500/25 shrink-0">
+                    {block.num}
+                  </span>
+                  <span>{block.text}</span>
+                </h2>
+              );
+            }
+            if (block.kind === "bullets") {
+              return (
+                <ul key={index} className="space-y-2.5">
+                  {block.items.map((item, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start gap-2.5 text-sm text-slate-400 leading-relaxed"
+                    >
+                      <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400/70 shrink-0" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              );
+            }
             return (
-              <div key={index} className={isHeader ? "pt-6" : ""}>
-                {isHeader ? (
-                  <h2 className="text-lg font-bold text-white mb-3 flex items-center gap-2.5">
-                    <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 text-sm font-bold ring-1 ring-indigo-500/25">
-                      {paragraph.split(" ")[0].replace(".", "")}
-                    </span>
-                    <span>{paragraph.replace(/^[0-9]+\.\s+/, "")}</span>
-                  </h2>
-                ) : isBullet ? (
-                  <ul className="space-y-2 mt-2">
-                    {paragraph.split("\n").filter((l) => l.trim().startsWith("- ")).map((line, i) => (
-                      <li key={i} className="flex items-start gap-2.5 text-sm text-slate-400 leading-relaxed">
-                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400/70 shrink-0" />
-                        <span>{line.trim().replace(/^-\s+/, "")}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="whitespace-pre-line leading-relaxed text-slate-300 text-sm">
-                    {paragraph}
-                  </p>
-                )}
-              </div>
+              <p key={index} className="leading-relaxed text-slate-300 text-sm">
+                {block.text}
+              </p>
             );
           })}
         </div>
