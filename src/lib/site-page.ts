@@ -48,8 +48,6 @@ Data in Constella is structured across three verified tiers:
 - Tier 2 (Character Profiles & Cast): Base character lists, aliases, and visual representations are retrieved from Fandom Community Wikis under Creative Commons Attribution-ShareAlike (CC-BY-SA). Dedicated wikis are discovered through Fandom's official unified search service rather than by guessing subdomains. When a series has no adequate Fandom wiki, the pipeline falls back to Wikipedia character articles (CC BY-SA 4.0) and the Kitsu character database.
 - Tier 3 (Relational Synthesis & AI-Assisted Tagging): Intricate interpersonal dynamics (alliances, betrayals, rivalries, family trees, secret identities) are extracted from wiki story summaries using a resilient multi-provider LLM chain (Gemini, Groq, OpenRouter). Every relationship is assigned explicit validity intervals and held in an administrative review queue before publication.
 
-Source fallback order: Fandom wiki (dedicated page) → Fandom hub wiki section → Wikipedia character article → Kitsu character bio → pure AI synthesis. Whichever source supplies the prose, the same AI extraction step enforces chapter-bounded validity, so the zero-spoiler contract does not depend on which source was used.
-
 3. Community Auditing & Open Verification
 Because storytelling evolves across hundreds of chapters and scanlations, our administrative curation is complemented by community oversight. Readers can report discrepancies or misaligned chapter boundaries directly to our GitHub tracker.`,
 } as const;

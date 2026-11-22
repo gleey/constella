@@ -187,15 +187,6 @@ export default async function AboutPage() {
               </p>
             </div>
           </div>
-
-          <p className="text-xs leading-relaxed text-slate-400">
-            <span className="font-semibold text-slate-200">Urutan sumber karakter:</span>{" "}
-            wiki Fandom (dedicated) → section hub Fandom → artikel karakter Wikipedia → bio Kitsu → sintesis AI murni. Teks dari sumber mana pun melewati tahap ekstraksi AI yang sama, sehingga batas bab temporal tetap ditegakkan identik.
-          </p>
-          <p className="text-xs leading-relaxed text-slate-400">
-            <span className="font-semibold text-slate-200">Urutan jumlah bab:</span>{" "}
-            AniList → MangaUpdates → nilai tersimpan → <span className="italic">floor</span> 100 (hanya bila semua sumber gagal).
-          </p>
         </div>
 
         <div className="mt-10 rounded-2xl bg-white/[0.03] ring-1 ring-white/10 p-5 sm:p-6">
