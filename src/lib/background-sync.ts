@@ -74,6 +74,11 @@ function addLog(msg: string) {
   console.log(`[BackgroundSync] ${msg}`);
 }
 
+/** Reset the visible log for a fresh manual run so stale entries don't dilute it. */
+function clearLogs() {
+  globalState.logs = [];
+}
+
 export function getBackgroundSyncStatus(): BackgroundSyncState {
   return { ...globalState, logs: [...globalState.logs] };
 }
@@ -894,6 +899,7 @@ export function startCatalogSync(targetAnilistId?: number): { started: boolean; 
     };
   }
 
+  clearLogs();
   globalState.isRunning = true;
   globalState.syncMode = "catalog";
   globalState.startedAt = new Date().toISOString();
@@ -926,6 +932,7 @@ export function startLoreSync(targetAnilistId?: number): { started: boolean; mes
     };
   }
 
+  clearLogs();
   globalState.isRunning = true;
   globalState.syncMode = "lore";
   globalState.startedAt = new Date().toISOString();
@@ -967,7 +974,7 @@ export function initBackgroundDaemon(intervalHours = 6) {
   daemonStarted = true;
 
   const autoLoreSync = process.env.ENABLE_AUTO_LORE_SYNC === "true";
-  const loreIntervalHours = parseInt(process.env.LORE_SYNC_INTERVAL_HOURS || "24", 10);
+  const loreIntervalHours = parseInt(process.env.LORE_SYNC_INTERVAL_HOURS || "168", 10);
 
   addLog(`Background daemon aktif (catalog interval: ${intervalHours} jam). Tier 1 tanpa AI.${autoLoreSync ? ` Lore sync otomatis AKTIF setiap ${loreIntervalHours} jam (MEMAKAN TOKEN AI).` : " Lore sync manual (via admin panel)."}`);
 

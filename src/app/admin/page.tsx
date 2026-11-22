@@ -55,6 +55,40 @@ interface LiveRelationship {
   isSensitive: boolean;
 }
 
+/**
+ * Parse a single background-sync log line into a timestamp + message and tint it
+ * by severity, so a manual sync is legible at a glance instead of a wall of
+ * identical grey text. Raw format from the server is "[hh:mm:ss] message".
+ */
+function SyncLogLine({ log }: { log: string }) {
+  const match = log.match(/^(\[[^\]]*\])\s?(.*)$/);
+  const timestamp = match ? match[1] : "";
+  const message = match ? match[2] : log;
+
+  let color = "text-slate-400";
+  const lower = message.toLowerCase();
+  if (/\berror\b|gagal|warning|warn/.test(lower)) {
+    color = "text-rose-400";
+  } else if (/selesai|berhasil|success|done/.test(lower)) {
+    color = "text-emerald-400";
+  } else if (/wiki|fandom|alternatif|wikipedia|kitsu|source/.test(lower)) {
+    color = "text-sky-400";
+  } else if (/dedup|gabung|merge|duplicate/.test(lower)) {
+    color = "text-amber-400";
+  } else if (/mulai|memulai|start/.test(lower)) {
+    color = "text-[#c4b5fd]";
+  }
+
+  return (
+    <div className="flex items-start gap-2 leading-relaxed">
+      {timestamp && (
+        <span className="shrink-0 select-none text-slate-600">{timestamp}</span>
+      )}
+      <span className={color}>{message}</span>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<"catalog" | "ingest" | "review" | "live" | "pages">("catalog");
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
@@ -727,15 +761,11 @@ export default function AdminPage() {
               </div>
 
               {/* Live Terminal Log Viewer */}
-              <div className="bg-black/40 rounded-xl p-3 max-h-36 overflow-y-auto font-mono text-[11px] text-slate-400 space-y-1 ring-1 ring-white/5">
+              <div className="bg-black/40 rounded-xl p-3 max-h-56 overflow-y-auto font-mono text-[11px] space-y-0.5 ring-1 ring-white/5">
                 {bgStatus.logs.length === 0 ? (
-                  <div>Waiting for logs...</div>
+                  <div className="text-slate-500">Waiting for logs...</div>
                 ) : (
-                  bgStatus.logs.slice(-15).map((log, i) => (
-                    <div key={i} className="leading-relaxed">
-                      {log}
-                    </div>
-                  ))
+                  bgStatus.logs.slice(-30).map((log, i) => <SyncLogLine key={i} log={log} />)
                 )}
               </div>
             </div>

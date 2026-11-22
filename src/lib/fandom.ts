@@ -264,9 +264,17 @@ async function verifyWikiHasSeriesContent(
   if (!normTitle) return false;
 
   const headers = { "User-Agent": "SpoilerFreeMap/1.0" };
-  const titleForms = [seriesTitle, ...synonyms]
+
+  // Subtitle-style titles ("Series: Subtitle", "Series - Subtitle") bury the
+  // franchise root under several subtitle words, but a dedicated wiki usually
+  // names its series page after the root alone ("Chiikawa", not "Chiikawa:
+  // Nanka Chiisakute Kawaii Yatsu"). Add that root as an extra title form so
+  // verification can find the page. Only the leading segment is used, so this
+  // never invents an unrelated name.
+  const rootForm = seriesTitle.split(/\s*[:\u2013\u2014]\s*|\s+-\s+/)[0]?.trim();
+  const titleForms = [seriesTitle, rootForm, ...synonyms]
     .filter((t): t is string => Boolean(t && t.trim()) && !isNonLatinTitle(t))
-    .slice(0, 4);
+    .slice(0, 5);
 
   try {
     // 1. Does a page named after the series (or a synonym) exist here?
@@ -318,10 +326,19 @@ async function verifyWikiHasSeriesContent(
         const searchJson = await searchRes.json();
         const hits: Array<{ title?: string }> = searchJson?.query?.search || [];
         const targetNorm = normalize(t);
+        // A full containment match is always reliable. For a looser partial
+        // match, only the *distinctive* tokens count and ALL of them must
+        // appear — otherwise a page sharing one common word ("Thor'zarck" for
+        // "The Color of the End", "Battle" for "Phantom Blood") would pass.
+        const distinctiveTokens = titleTokens(t).filter(isDistinctiveAnchor);
         const meaningfulHit = hits.some((h) => {
           const titleNorm = normalize(h?.title || "");
-          // The page title must contain the full requested title.
-          return titleNorm.includes(targetNorm);
+          if (titleNorm.includes(targetNorm)) return true;
+          if (distinctiveTokens.length === 0) return false;
+          const hitTokens = titleTokens(h?.title || "");
+          return distinctiveTokens.every((tok) =>
+            hitTokens.some((ht) => tokensMatch(ht, tok)),
+          );
         });
         if (meaningfulHit) return true;
       } catch {
@@ -359,6 +376,11 @@ const GENERIC_WIKI_MARKERS = [
   "powerlisting", "heroes", "villains", "best tv shows", "animanga", "historica",
   "civilization", "wikia database", "fictional", "headcanon", "saimoe", "respect thread",
   "battle wiki", "comic vine", "wiki database", "encyclopedia", "everything",
+  // Multi-webtoon aggregators collect many series under one wiki, so their
+  // name is never a single series ("Villain to Kill (Webtoons) Wiki"). Without
+  // this they beat the real dedicated wiki because every series' distinctive
+  // token ("villainess" ~ "villain") appears in their name.
+  "webtoons",
 ];
 
 /** Normalize a title for comparison: lowercase, ASCII, alphanumeric + spaces. */
@@ -549,6 +571,24 @@ function scoreWikiIdentity(
   if (distinctiveHits.length === 0) return null;
 
   const coverage = matchedSeriesTokens.length / seriesTokens.length;
+
+  // Signal 4b: a subdomain that is *exactly* the series' distinctive leading
+  // token is that series' own wiki. Subtitle-style titles ("Chiikawa: Nanka
+  // Chiisakute Kawaii Yatsu", "JoJo's Bizarre Adventure Part 1: Phantom Blood")
+  // bury the franchise name under several subtitle words, so coverage stays low
+  // even for the correct wiki. But a wiki hosted at precisely that leading token
+  // is very rarely a coincidence, so treat it as strong evidence rather than
+  // demanding full coverage. Long-token guard keeps this from being generic.
+  const hostAsSlug = hostClean.replace(/\s+/g, "");
+  const leadingToken = distinctiveHits[0];
+  if (
+    seriesTokens.length >= 2 &&
+    leadingToken &&
+    leadingToken.length >= 5 &&
+    hostAsSlug === leadingToken
+  ) {
+    return 80;
+  }
 
   // Signal 5: a long wiki name that only brushes one title word is unrelated
   // ("The Yellow-Haired Villain ... Wants Happiness Wiki" for "Happiness").
@@ -880,14 +920,19 @@ export async function resolveFandomWikiSubdomain(
   };
 
   // Acronyms (e.g., "The Beginning After the End" -> "tbate", "Omniscient Reader's Viewpoint" -> "orv")
+  // A bare acronym can collide with a completely unrelated wiki that merely spells the same
+  // initials ("Inside Mari" -> "mari" hits a 2-page dead wiki; "Mission In the Apocalypse" ->
+  // "mia" hits M.I.A. the rapper). Collect them so they can be held to content verification.
+  const acronymCandidates: string[] = [];
   const allWords = cleaned.split(/\s+/).filter(Boolean);
   if (allWords.length > 1) {
-    candidates.push(allWords.map((w) => w[0]?.toLowerCase()).join(""));
+    acronymCandidates.push(allWords.map((w) => w[0]?.toLowerCase()).join(""));
   }
   const nonStopWords = allWords.filter((w) => !["the", "of", "a", "an", "and"].includes(w.toLowerCase()));
   if (nonStopWords.length > 1) {
-    candidates.push(nonStopWords.map((w) => w[0]?.toLowerCase()).join(""));
+    acronymCandidates.push(nonStopWords.map((w) => w[0]?.toLowerCase()).join(""));
   }
+  candidates.push(...acronymCandidates);
 
   // Full slug and variations
   const baseSlug = toSlug(cleaned);
@@ -948,9 +993,8 @@ export async function resolveFandomWikiSubdomain(
   }
 
   // Single-word candidates (acronyms and last-word fallbacks) are dangerous because they can match
-  // huge unrelated franchise wikis ("pokemon", "friends", "marvel", etc.). Mark them so the resolver
-  // can apply strict verification.
-  const singleWordCandidates = new Set(lastWordCandidates);
+  // huge unrelated franchise wikis ("pokemon", "friends", "marvel", etc.). See below for the set,
+  // built once every acronym (title + synonyms) has been collected.
 
   // Stripped prefixes (e.g., "the-", "solo-", "im-the-", "i-am-the-", "revenge-of-the-")
   const prefixes = [/^the-/, /^solo-/, /^im-the-/, /^i-am-the-/, /^revenge-of-the-/, /^revenge-of-/];
@@ -1029,11 +1073,15 @@ export async function resolveFandomWikiSubdomain(
 
     const synWords = cSyn.split(/\s+/).filter(Boolean);
     if (synWords.length > 1) {
-      candidates.push(synWords.map((w) => w[0]?.toLowerCase()).join(""));
+      const acr = synWords.map((w) => w[0]?.toLowerCase()).join("");
+      acronymCandidates.push(acr);
+      candidates.push(acr);
     }
     const synNonStopWords = synWords.filter((w) => !["the", "of", "a", "an", "and"].includes(w.toLowerCase()));
     if (synNonStopWords.length > 1) {
-      candidates.push(synNonStopWords.map((w) => w[0]?.toLowerCase()).join(""));
+      const acr = synNonStopWords.map((w) => w[0]?.toLowerCase()).join("");
+      acronymCandidates.push(acr);
+      candidates.push(acr);
     }
     for (const p of prefixes) {
       if (p.test(synSlug)) {
@@ -1074,6 +1122,14 @@ export async function resolveFandomWikiSubdomain(
       longCandidates.push(c);
     }
   }
+
+  // Single-word candidates (acronyms and last-word fallbacks) are dangerous because they can match
+  // huge unrelated franchise wikis ("pokemon", "friends", "marvel", etc.). Acronyms especially: a
+  // 2-4 letter candidate can coincide with an unrelated wiki sharing those initials ("Inside Mari"
+  // -> "mari", "Mission In the Apocalypse" -> "mia" = M.I.A. the rapper), so they must prove coverage
+  // via content, not just spelling. Built here so title AND synonym acronyms are all included.
+  const singleWordCandidates = new Set([...lastWordCandidates, ...acronymCandidates]);
+
   // Last-word candidates are tried after everything else (they're low-priority fallbacks)
   const uniqueCandidates = [...longCandidates, ...shortAcronyms, ...lastWordCandidates];
 
@@ -1115,17 +1171,37 @@ export async function resolveFandomWikiSubdomain(
           if (cand.length <= 3 && articles < 15) continue;
 
           // Relevance check: verify the wiki sitename or mainpage relates to the series title.
+          // Matching is done on whole WORDS, not substrings — a naive `.includes()` lets an
+          // acronym like "teou" match "The Epics of Uuruk" (t-e-o-u substring) and lets a
+          // common word like "blood" match any "Blood Wiki".
           const mainpage: string = json.query.general.mainpage || "";
-          const sitenameLower = sitename.toLowerCase();
-          const titleTokens = toSlug(seriesTitle).split("-").filter((t) => t.length > 2);
-          const candTokens = cand.split("-").filter((t) => t.length > 2);
+          const siteNorm = normalizeTitleForMatch(sitename.replace(/\bwiki\b|\bwikia\b/gi, ""));
+          const mainNorm = normalizeTitleForMatch(mainpage.replace(/\bwiki\b|\bwikia\b/gi, ""));
+          const nameWords = new Set([...siteNorm.split(" "), ...mainNorm.split(" ")].filter(Boolean));
 
-          // Check if sitename or mainpage contains a meaningful token from the title or candidate
+          const wordsMatch = (token: string) =>
+            [...nameWords].some((w) => tokensMatch(w, token));
+
+          // A bare acronym ("gos", "teou") is relevant only when the wiki's name initials
+          // spell it out AND the wiki is named after this work, not merely containing the
+          // letters in order. "gOS Wiki" → "gos" qualifies; "The Epics of Uuruk" → "teou" does
+          // not, because the leading "The"/"of" are just connective words in a longer title.
+          const initials = [...nameWords].map((w) => w[0]).join("");
+          const acronymRelevant =
+            initials === cand ||
+            // Tolerate a leading "the" in the wiki name: "The GOS Wiki".
+            initials === `the${cand}`;
+
+          const titleWordTokens = toSlug(seriesTitle)
+            .split("-")
+            .filter((t) => t.length > 2 && !MATCH_STOPWORDS.has(t));
+          const candWordTokens = cand.split("-").filter((t) => t.length > 2);
+
           const isRelevant =
-            titleTokens.some((t) => sitenameLower.includes(t) || mainpage.toLowerCase().includes(t)) ||
-            candTokens.some((t) => sitenameLower.includes(t) || mainpage.toLowerCase().includes(t)) ||
-            sitenameLower.includes(toSlug(seriesTitle)) ||
-            toSlug(seriesTitle).includes(sitenameLower.replace(/\s+/g, "-"));
+            acronymRelevant ||
+            titleWordTokens.some(wordsMatch) ||
+            candWordTokens.some(wordsMatch) ||
+            siteNorm === normalizeTitleForMatch(seriesTitle);
 
           // For short acronyms (<= 4 chars), require strict relevance
           if (cand.length <= 4 && !isRelevant) continue;
@@ -1133,17 +1209,23 @@ export async function resolveFandomWikiSubdomain(
           // For single-word fallbacks (e.g. "punpun", "pokemon"), require that the sitename
           // is specifically about this series — not a mega-franchise that shares a word.
           if (isSingleWordFallback) {
-            const exactWordMatch = sitenameLower === cand.toLowerCase() ||
-              sitenameLower === `${cand.toLowerCase()} wiki` ||
-              sitenameLower.includes(toSlug(seriesTitle)) ||
-              mainpage.toLowerCase().includes(toSlug(seriesTitle));
+            const slugTitle = toSlug(seriesTitle);
+            const exactWordMatch = siteNorm === cand.toLowerCase() ||
+              siteNorm === `${cand.toLowerCase()} wiki` ||
+              siteNorm.replace(/\s+/g, "-").includes(slugTitle) ||
+              mainNorm.replace(/\s+/g, "-").includes(slugTitle);
             // If the exact title isn't in the sitename, only accept small single-word wikis
             // (< 1000 articles) where the sitename actually contains the word.
             // This prevents mega-franchises like "pokemon" (38k articles) or "friends" (1.6k)
             // while allowing genuine small wikis like "punpun" (143 articles).
             const isSmallDistinctiveWiki = articles < 1000 &&
-              (sitenameLower.includes(cand.toLowerCase()) || mainpage.toLowerCase().includes(cand.toLowerCase()));
+              ([...nameWords].some((w) => tokensMatch(w, cand.toLowerCase())));
             if (!exactWordMatch && !isSmallDistinctiveWiki) continue;
+
+            // A single-word/acronym candidate with almost no articles is a dead wiki, not a
+            // usable source — "mari" (a 2-page empty wiki) would otherwise pass only because
+            // its name matches. Real single-word wikis ("punpun" 143, "tbate" 1k+) have content.
+            if (articles < 10) continue;
           }
 
           // For longer candidates that pass relevance, also do content-based verification
