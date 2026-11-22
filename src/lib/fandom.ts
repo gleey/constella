@@ -383,6 +383,89 @@ const GENERIC_WIKI_MARKERS = [
   "webtoons",
 ];
 
+/**
+ * Subdomain suffixes that single-series wikis use when the bare title slug is
+ * already taken by a different work. "Bastard" the manhwa lives at
+ * "bastard-webtoon" because "bastard" is the 1990s manga.
+ */
+const DISAMBIG_SUFFIXES = ["-webtoon", "-manhwa", "-manhwa-webtoon", "-manga", "-comic", "-series", "-webcomic", "-novel"];
+
+interface AggregatedWiki {
+  subdomain: string;
+  sitename: string;
+  score: number;
+  exactPageTitles: string[];
+  hub: string;
+  hitCount: number;
+  /**
+   * True when the wiki's identity was established by a decisive signal (its
+   * name or subdomain equals the series title, or equals a known synonym).
+   * Those need no further proof. Weak fuzzy matches do.
+   */
+  decisive: boolean;
+}
+
+/**
+ * Candidates where an exact title-identity match is still not enough, because
+ * the same name exists on several wikis (hub pages, other franchises) and we
+ * must pick the one that actually covers *this* series.
+ *
+ * Priority:
+ *   1. A disambiguated dedicated wiki ("bastard-webtoon") — when one exists,
+ *      the bare slug ("bastard") almost certainly belongs to a different work
+ *      that claimed it first.
+ *   2. Any other dedicated wiki whose content actually mentions the series.
+ *   3. A hub page named exactly like the series (last resort — hubs are
+ *      aggregator wikis and only give a small section's worth of characters).
+ */
+async function resolveDisambiguatedCandidates(
+  ranked: AggregatedWiki[],
+  seriesTitle: string,
+  synonyms: string[],
+): Promise<string | null> {
+  const disambiguated = ranked.filter((w) =>
+    DISAMBIG_SUFFIXES.some((sfx) => w.subdomain.endsWith(sfx)),
+  );
+  const otherDedicated = ranked.filter(
+    (w) =>
+      !(HUB_WIKIS as readonly string[]).includes(w.subdomain) &&
+      !DISAMBIG_SUFFIXES.some((sfx) => w.subdomain.endsWith(sfx)),
+  );
+  const hubs = ranked.filter((w) => (HUB_WIKIS as readonly string[]).includes(w.subdomain));
+
+  if (disambiguated.length === 0 && hubs.length === 0) return null;
+
+  // 1 & 2: verify dedicated wikis, disambiguated ones first.
+  const pool = [...disambiguated, ...otherDedicated].slice(0, 4);
+  const verified: AggregatedWiki[] = [];
+  for (const w of pool) {
+    const ok = await verifyWikiHasSeriesContent(w.subdomain, seriesTitle, synonyms);
+    if (ok) verified.push(w);
+  }
+
+  if (verified.length > 0) {
+    // Prefer a verified disambiguated wiki; then strongest identity score;
+    // ties go to the more specific (longer) subdomain.
+    verified.sort((a, b) => {
+      const aD = DISAMBIG_SUFFIXES.some((sfx) => a.subdomain.endsWith(sfx)) ? 1 : 0;
+      const bD = DISAMBIG_SUFFIXES.some((sfx) => b.subdomain.endsWith(sfx)) ? 1 : 0;
+      if (aD !== bD) return bD - aD;
+      return b.score - a.score || b.subdomain.length - a.subdomain.length;
+    });
+    return verified[0].subdomain;
+  }
+
+  // 3: no dedicated wiki proved coverage — fall back to the highest-scoring
+  // hub page (admitted only when it carries a page named exactly like the
+  // series, which is the coverage proof by construction).
+  const bestHub = hubs.sort((a, b) => b.score - a.score)[0];
+  if (bestHub) {
+    const pageTitle = bestHub.exactPageTitles[0];
+    if (pageTitle) return `${bestHub.subdomain}#${pageTitle.replace(/\s+/g, "_")}`;
+  }
+  return null;
+}
+
 /** Normalize a title for comparison: lowercase, ASCII, alphanumeric + spaces. */
 function normalizeTitleForMatch(raw: string): string {
   return (raw || "")
@@ -456,6 +539,8 @@ interface FandomSearchHit {
   sitename: string;
   pageTitle: string;
   hub: string;
+  /** Fandom vertical for the wiki: "anime", "tv", "games", "books", ... */
+  wikiHub: string;
 }
 
 /** One unified-search request, memoized for 12h. Never throws. */
@@ -495,6 +580,7 @@ async function fandomUnifiedSearch(query: string, limit = 20): Promise<FandomSea
           sitename: r.sitename || "",
           pageTitle: r.title || "",
           hub: r.hub || "",
+          wikiHub: r.wikiHub || "",
         });
       } catch {
         // Malformed URL — ignore this result.
@@ -659,22 +745,7 @@ export async function discoverWikiViaUnifiedSearch(
     );
   };
 
-  interface Aggregated {
-    subdomain: string;
-    sitename: string;
-    score: number;
-    exactPageTitles: string[];
-    hub: string;
-    hitCount: number;
-    /**
-     * True when the wiki's identity was established by a decisive signal (its
-     * name or subdomain equals the series title, or equals a known synonym).
-     * Those need no further proof. Weak fuzzy matches do.
-     */
-    decisive: boolean;
-  }
-
-  const byWiki = new Map<string, Aggregated>();
+  const byWiki = new Map<string, AggregatedWiki>();
 
   for (const query of queries) {
     const hits = await fandomUnifiedSearch(query);
@@ -683,7 +754,23 @@ export async function discoverWikiViaUnifiedSearch(
 
       const pageIsExact = pageMatchesAnyTitle(hit.pageTitle);
 
+      // Non-English wikis (webtoon.fandom.com/de, /es, ...) surface as the
+      // same subdomain; their casts are not usable for an English catalog.
+      const url = (hit as { url?: string }).url || "";
+      if (/\/\/[^/]+\.fandom\.com\/[a-z]{2}\//i.test(url)) continue;
+
+      // Wikis from unrelated verticals (a TV show, game or band sharing the
+      // series' name) can otherwise win on an exact name match and import the
+      // wrong franchise's cast — exactly how the Bastard manhwa ended up with
+      // the "Bastard!!" manga cast. Hub whitelists are exempt: they aggregate
+      // anime/webtoon content by construction.
       const isHub = (HUB_WIKIS as readonly string[]).includes(hit.subdomain);
+      if (!isHub) {
+        const vertical = (hit.wikiHub || hit.hub || "").toLowerCase();
+        if (vertical && !vertical.includes("anime") && !vertical.includes("comic") && !vertical.includes("book")) {
+          continue;
+        }
+      }
 
       // Hub wikis (webtoon, vsbattles, ...) are shared by thousands of series, so
       // their sitename never matches a series title. They are only usable when
@@ -768,6 +855,29 @@ export async function discoverWikiViaUnifiedSearch(
   // through to the legacy subdomain-probing path instead of being trusted.
   const MIN_SCORE = 55;
 
+  // Ambiguity gate: when several wikis claim the exact title identity (e.g. the
+  // "Bastard" manga wiki vs the "bastard-webtoon" manhwa wiki vs the webtoon
+  // hub page), a plain name match cannot tell them apart. Resolve among them
+  // first — a disambiguated subdomain or a hub page wins over the bare slug,
+  // which otherwise "decisively" resolves to the wrong franchise and imports
+  // its entire cast.
+  const titleKey = normalizeTitleForMatch(seriesTitle);
+  const exactCandidates = ranked.filter(
+    (w) =>
+      w.score >= MIN_SCORE &&
+      ((HUB_WIKIS as readonly string[]).includes(w.subdomain) ||
+        normalizeTitleForMatch(w.sitename.replace(/\bwiki\b|\bwikia\b/gi, "")) === titleKey ||
+        w.subdomain.replace(/-/g, " ") === titleKey),
+  );
+  if (exactCandidates.length > 1) {
+    const resolvedAmbiguity = await resolveDisambiguatedCandidates(
+      exactCandidates,
+      seriesTitle,
+      synonyms,
+    );
+    if (resolvedAmbiguity) return resolvedAmbiguity;
+  }
+
   for (const candidate of ranked.slice(0, 3)) {
     if (candidate.score < MIN_SCORE) break;
 
@@ -838,9 +948,10 @@ export async function discoverWikiViaUnifiedSearch(
  */
 export async function resolveFandomWikiSubdomain(
   seriesTitle: string,
-  synonyms: string[] = []
+  synonyms: string[] = [],
+  minAnilistCharacters = 0,
 ): Promise<string | null> {
-  const cacheKey = seriesTitle.toLowerCase().trim();
+  const cacheKey = `${seriesTitle.toLowerCase().trim()}::${minAnilistCharacters}`;
   if (wikiSubdomainCache.has(cacheKey)) {
     return wikiSubdomainCache.get(cacheKey) ?? null;
   }
@@ -869,10 +980,12 @@ export async function resolveFandomWikiSubdomain(
   //    instead of guessing subdomains, and is far cheaper than probing dozens
   //    of candidates. Falls through to probing when nothing is confident.
   const discovered = await discoverWikiViaUnifiedSearch(seriesTitle, synonyms);
-  if (discovered) {
+  if (discovered && !discovered.includes("#")) {
     wikiSubdomainCache.set(cacheKey, discovered);
     return discovered;
   }
+  // A hub section is a weak result: keep looking through legacy probing for a
+  // dedicated wiki, and only fall back to the hub when probing finds nothing.
 
   const cleanTitle = (raw: string) =>
     raw
@@ -1266,16 +1379,25 @@ export async function resolveFandomWikiSubdomain(
     return bestCand;
   }
 
+  // Hub sections carry only a handful of characters. When AniList already
+  // provides a decent cast, prefer the hub only as a supplement — fall through
+  // to the alt-source roster instead of replacing a good AniList cast with a
+  // tiny hub list. (The hub is still better than nothing for a bare roster.)
+  if (discovered && minAnilistCharacters < 10) {
+    wikiSubdomainCache.set(cacheKey, discovered);
+    return discovered;
+  }
+
   // 2. Hub wiki fallback (e.g. koreanwebtoons.fandom.com)
   const hubResult = await findWikiFromHub(seriesTitle, synonyms);
-  if (hubResult) {
+  if (hubResult && minAnilistCharacters < 10) {
     wikiSubdomainCache.set(cacheKey, hubResult);
     return hubResult;
   }
 
   // 3. Multi-series hub wiki fallback (e.g. webtoon#PIGPEN, vsbattles#God_of_Blackfield)
   const hubProbe = await probeHubWikis(seriesTitle, synonyms);
-  if (hubProbe) {
+  if (hubProbe && minAnilistCharacters < 10) {
     wikiSubdomainCache.set(cacheKey, hubProbe);
     return hubProbe;
   }
@@ -1658,7 +1780,10 @@ export interface FandomCharacterSummary {
   imageUrl: string;
 }
 
-// ── Subpage / non-character title patterns to filter out ─────────────
+// ── Subpage / non-character title blocklist ─────────────────────────────
+// Category listing pages ("Characters", "Main Characters") are themselves
+// members of Category:Characters on many wikis (e.g. bastard-webtoon) and
+// would be ingested as a fake character named "Characters".
 const SKIP_TITLE_PATTERNS = [
   /\bcategory:/i,
   /\blist of\b/i,
@@ -1671,6 +1796,11 @@ const SKIP_TITLE_PATTERNS = [
   /\/synopsis$/i,
   /\/quotes$/i,
   /\/trivia$/i,
+  /^(main\s+)?characters?$/i,
+  /^minor\s+characters?$/i,
+  /^supporting\s+characters?$/i,
+  /^chapters?$/i,
+  /^episodes?$/i,
 ];
 
 function isCharacterTitle(title: string): boolean {

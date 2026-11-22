@@ -223,18 +223,12 @@ async function enrichMedia(config: SeriesMapping) {
   const allNamesList = dbCharacters.map((c) => c.name);
 
   // 2. Process priority characters via Fandom + Gemini
-  // Fallback global: seri tanpa override → pilih otomatis 15 karakter yang belum punya deskripsi.
+  // Fallback global: seri tanpa override → proses 15 karakter pertama.
+  // Tidak ada skip berdasarkan lore lama — setiap run mengekstrak ulang dan
+  // menimpa hasil sebelumnya, jadi lore yang salah tidak pernah menetap.
   let priorityNames = config.mainCharacters;
   if (priorityNames.length === 0) {
-    const enrichedIds = new Set(
-      (
-        await prisma.characterDescription.groupBy({
-          by: ["characterId"],
-          where: { character: { mediaId: media.id } },
-        })
-      ).map((d) => d.characterId)
-    );
-    priorityNames = dbCharacters.filter((c) => !enrichedIds.has(c.id)).slice(0, 15).map((c) => c.name);
+    priorityNames = dbCharacters.slice(0, 15).map((c) => c.name);
     console.log(`[AUTO] Seri "${media.title}" tanpa override → auto-pilih ${priorityNames.length} karakter untuk pengayaan.`);
   }
   for (const charName of priorityNames) {
@@ -244,18 +238,6 @@ async function enrichMedia(config: SeriesMapping) {
 
     if (!dbChar) {
       console.log(`[SKIP] Karakter ${charName} tidak ditemukan di database.`);
-      continue;
-    }
-
-    // Idempotent: lewati karakter yang sudah punya lore AI (bukan placeholder auto-sync).
-    const existingDesc = await prisma.characterDescription.findFirst({
-      where: {
-        characterId: dbChar.id,
-        NOT: { text: { contains: "is a character featured in" } },
-      },
-    });
-    if (existingDesc) {
-      console.log(`[SKIP] ${charName} sudah berlore AI — lewati.`);
       continue;
     }
 
@@ -402,17 +384,11 @@ async function enrichMedia(config: SeriesMapping) {
         const vFrom = Math.max(1, f.validFrom || introduced);
         const vUntil = f.validUntil !== null && f.validUntil > vFrom ? f.validUntil : null;
 
-        // Skip identical membership that already exists (idempotent re-runs)
-        const existingMembership = await prisma.factionMembership.findFirst({
-          where: {
-            factionId: faction.id,
-            characterId: dbChar.id,
-            validFrom: vFrom,
-          },
+        // Re-runs overwrite: drop any prior membership of this character in
+        // this faction, then write the freshly parsed one.
+        await prisma.factionMembership.deleteMany({
+          where: { factionId: faction.id, characterId: dbChar.id },
         });
-        if (existingMembership) continue;
-
-        // Create membership
         await prisma.factionMembership.create({
           data: {
             factionId: faction.id,
@@ -440,30 +416,30 @@ async function enrichMedia(config: SeriesMapping) {
         try {
           validateTemporalBounds(vFrom, vUntil);
 
-          // Check if identical relation already exists
-          const existingRel = await prisma.relationship.findFirst({
+          // Re-runs overwrite: drop prior same-type lines on this unordered
+          // pair, then write the freshly parsed one — no stacking.
+          await prisma.relationship.deleteMany({
             where: {
+              mediaId: media.id,
+              relationType: r.relationType,
+              OR: [
+                { sourceCharacterId: dbChar.id, targetCharacterId: targetCharId },
+                { sourceCharacterId: targetCharId, targetCharacterId: dbChar.id },
+              ],
+            },
+          });
+          await prisma.relationship.create({
+            data: {
               mediaId: media.id,
               sourceCharacterId: dbChar.id,
               targetCharacterId: targetCharId,
+              relationType: r.relationType,
               validFrom: vFrom,
+              validUntil: vUntil,
+              isSensitive: Boolean(r.isSensitive),
             },
           });
-
-          if (!existingRel) {
-            await prisma.relationship.create({
-              data: {
-                mediaId: media.id,
-                sourceCharacterId: dbChar.id,
-                targetCharacterId: targetCharId,
-                relationType: r.relationType,
-                validFrom: vFrom,
-                validUntil: vUntil,
-                isSensitive: Boolean(r.isSensitive),
-              },
-            });
-            relCount++;
-          }
+          relCount++;
         } catch (e) {}
       }
       console.log(`[DB] ${relCount} relasi tersambung disimpan untuk ${dbChar.name}.`);

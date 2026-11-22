@@ -173,14 +173,32 @@ async function runCatalogSync(targetAnilistId?: number) {
         },
       });
 
-      // Resolve Fandom Wiki (cached)
+      // Resolve Fandom Wiki fresh on every sync. Wiki resolution can improve
+      // (new disambiguation rules, wikis being created/moved), so the result
+      // must never be frozen in the database.
       const wikiSubdomain = await resolveFandomWikiSubdomain(
         anilistDetail.title,
         mediaTitleForms(anilistDetail),
+        anilistDetail.characters?.length ?? 0,
       );
       if (wikiSubdomain) {
         addLog(`Fandom wiki: "${wikiSubdomain}" untuk ${anilistDetail.title}`);
       }
+
+      // Full-refresh roster sync: every catalog run rebuilds this series'
+      // roster from the sources and removes rows that no source backs anymore.
+      // Characters pulled in by a previously mis-resolved wiki (e.g. Bastard
+      // holding the whole "Bastard!!" manga cast) are deleted here instead of
+      // persisting forever; the lore sync then re-extracts whoever remains, so
+      // there is no "already synced → skip" shortcut anywhere in the pipeline.
+      const staleIdsBefore = new Set(
+        (await prisma.character.findMany({ where: { mediaId: media.id }, select: { id: true } })).map((c) => c.id),
+      );
+      const keepCharacterIds = new Set<string>();
+      const markKept = (id: string) => {
+        keepCharacterIds.add(id);
+        staleIdsBefore.delete(id);
+      };
 
       // Build character list from AniList, fallback to Fandom Category:Characters
       let charactersToSync: Array<{
@@ -312,42 +330,33 @@ async function runCatalogSync(targetAnilistId?: number) {
           }
         }
 
+        // Every sync overwrites the row's mutable fields from the fresh source
+        // data — nothing is skipped because it "was synced before". Matching
+        // rows are also marked as kept so the stale-row purge below knows this
+        // row is backed by a current source.
         if (existing) {
-          // Update image if current one is broken + merge aliases (incl. variant name)
-          if (finalImage && isBrokenImageUrl(existing.imageUrl)) {
+          markKept(existing.id);
+          const aliasSet = new Set([...existing.aliases, ...c.aliases]);
+          if (c.name !== existing.name) aliasSet.add(c.name);
+          const nextAliases = Array.from(aliasSet).filter((a) => a !== existing.name);
+          const nextImage = finalImage || existing.imageUrl;
+          const nextIntro = Math.max(1, Math.min(estimatedIntro, totalChapters));
+          if (
+            nextImage !== existing.imageUrl ||
+            nextAliases.length !== existing.aliases.length ||
+            nextIntro !== existing.introducedAtChapter
+          ) {
             await prisma.character.update({
               where: { id: existing.id },
               data: {
-                imageUrl: finalImage,
-                aliases: Array.from(new Set([...existing.aliases, ...c.aliases, c.name])),
+                imageUrl: nextImage,
+                aliases: nextAliases,
+                introducedAtChapter: nextIntro,
               },
             });
-            existing.imageUrl = finalImage;
-          } else if (c.name !== existing.name && !existing.aliases.includes(c.name)) {
-            await prisma.character.update({
-              where: { id: existing.id },
-              data: { aliases: Array.from(new Set([...existing.aliases, c.name])) },
-            });
-            existing.aliases = [...existing.aliases, c.name];
-          }
-          // Only adjust introducedAtChapter for lore-less placeholder rows.
-          // Curated rows (with descriptions/statuses/relationships) keep their
-          // hand-verified debut chapters.
-          if (existing.introducedAtChapter === 1 && estimatedIntro > 1) {
-            const [dCount, sCount, rCount] = await Promise.all([
-              prisma.characterDescription.count({ where: { characterId: existing.id } }),
-              prisma.characterStatus.count({ where: { characterId: existing.id } }),
-              prisma.relationship.count({
-                where: { OR: [{ sourceCharacterId: existing.id }, { targetCharacterId: existing.id }] },
-              }),
-            ]);
-            if (dCount + sCount + rCount === 0) {
-              await prisma.character.update({
-                where: { id: existing.id },
-                data: { introducedAtChapter: estimatedIntro },
-              });
-              existing.introducedAtChapter = estimatedIntro;
-            }
+            existing.imageUrl = nextImage;
+            existing.aliases = nextAliases;
+            existing.introducedAtChapter = nextIntro;
           }
         } else {
           const created = await prisma.character.create({
@@ -490,6 +499,22 @@ async function runCatalogSync(targetAnilistId?: number) {
       }
 
       addLog(`Katalog ${anilistDetail.title} berhasil disinkronkan (${charactersToSync.length} karakter).`);
+
+      // Purge rows no current source backs (mis-resolved wiki leftovers, cast
+      // removals). Their lore (descriptions/statuses/memberships/relations)
+      // cascades with them, so no foreign-series data survives a re-sync.
+      const staleIds = Array.from(staleIdsBefore);
+      if (staleIds.length > 0) {
+        const staleNames = (
+          await prisma.character.findMany({
+            where: { id: { in: staleIds } },
+            select: { name: true },
+          })
+        ).map((c) => c.name);
+        await prisma.character.deleteMany({ where: { id: { in: staleIds } } });
+        addLog(`Membersihkan ${staleIds.length} karakter usang dari ${anilistDetail.title}: ${staleNames.slice(0, 8).join(", ")}${staleNames.length > 8 ? ", …" : ""}`);
+      }
+
       globalState.completedSeries++;
       globalState.progress = Math.round((globalState.completedSeries / globalState.totalSeries) * 100);
     } catch (err: any) {
@@ -671,31 +696,20 @@ async function runLoreSync(targetAnilistId?: number) {
       const dbCharacters = await prisma.character.findMany({ where: { mediaId: media.id } });
       const allNamesList = dbCharacters.map((c) => c.name);
 
-      // Skip serial/karakter yang sudah punya lore hasil ekstraksi AI.
-      // Placeholder dari auto-sync ("X is a character featured in Y.") tidak dihitung.
-      const syncedRows = await prisma.characterDescription.findMany({
-        where: {
-          character: { mediaId: media.id },
-          NOT: { text: { contains: "is a character featured in" } },
-        },
-        select: { characterId: true },
-        distinct: ["characterId"],
-      });
-      const syncedIds = new Set(syncedRows.map((d) => d.characterId));
-
-      // Prioritize characters without AI lore (allow up to 15 for targeted sync, 6 for full sweep)
+      // Full re-extract on every run: lore from a previously mis-resolved wiki
+      // (e.g. "Bastard!!" manga lore sitting on the Bastard manhwa) must be
+      // replaced, not preserved. Old rows are deleted before new ones are
+      // written, so a "synced before" state never causes a skip.
       const maxCharsToSync = targetAnilistId ? 15 : 6;
-      const pendingChars = dbCharacters
-        .filter((c) => !syncedIds.has(c.id))
-        .slice(0, maxCharsToSync);
+      const pendingChars = dbCharacters.slice(0, maxCharsToSync);
 
       if (pendingChars.length === 0) {
-        addLog(`[SKIP] ${media.title} sudah memiliki lore AI untuk semua karakter prioritas — lewati (hemat token AI).`);
+        addLog(`[SKIP] ${media.title} tidak punya karakter — jalankan catalog sync dulu.`);
         globalState.completedSeries++;
         globalState.progress = Math.round((globalState.completedSeries / globalState.totalSeries) * 100);
         continue;
       }
-      addLog(`[Lore Sync] ${media.title}: ${pendingChars.length} karakter perlu diekstrak lore-nya.`);
+      addLog(`[Lore Sync] ${media.title}: mengekstrak lore untuk ${pendingChars.length} karakter.`);
 
       for (const dbChar of pendingChars) {
         globalState.currentCharacter = dbChar.name;
@@ -824,9 +838,10 @@ async function runLoreSync(targetAnilistId?: number) {
             const vUntil = r.validUntil !== null && r.validUntil > vFrom ? r.validUntil : null;
             try {
               validateTemporalBounds(vFrom, vUntil);
-              // Unordered + same-type check so re-running lore sync never
-              // stacks a second identical line on the same pair.
-              const exists = await prisma.relationship.findFirst({
+              // A re-sync overwrites rather than stacks: any existing line of
+              // the same type on this unordered pair is removed first, then
+              // the freshly parsed line is written.
+              await prisma.relationship.deleteMany({
                 where: {
                   mediaId: media.id,
                   relationType: r.relationType,
@@ -836,19 +851,17 @@ async function runLoreSync(targetAnilistId?: number) {
                   ],
                 },
               });
-              if (!exists) {
-                await prisma.relationship.create({
-                  data: {
-                    mediaId: media.id,
-                    sourceCharacterId: dbChar.id,
-                    targetCharacterId: targetCharId,
-                    relationType: r.relationType,
-                    validFrom: vFrom,
-                    validUntil: vUntil,
-                    isSensitive: Boolean(r.isSensitive),
-                  },
-                });
-              }
+              await prisma.relationship.create({
+                data: {
+                  mediaId: media.id,
+                  sourceCharacterId: dbChar.id,
+                  targetCharacterId: targetCharId,
+                  relationType: r.relationType,
+                  validFrom: vFrom,
+                  validUntil: vUntil,
+                  isSensitive: Boolean(r.isSensitive),
+                },
+              });
             } catch {}
           }
         }
