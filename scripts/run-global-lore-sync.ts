@@ -41,7 +41,7 @@ function run(script: string, args: string[] = []): Promise<number> {
 
 async function main() {
   console.log("=== Global Lore Sync — Step 1/2: cast ingestion (no AI) ===");
-  const ingestCode = await run("ingest-fandom-cast.ts", ["--limit=300"]);
+  const ingestCode = await run("ingest-fandom-cast.ts", ["--limit=300", "--empty-only"]);
   if (ingestCode !== 0) {
     console.warn(`ingest-fandom-cast exited ${ingestCode}; continuing anyway.`);
   }

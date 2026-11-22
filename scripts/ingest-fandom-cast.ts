@@ -22,13 +22,18 @@ async function main() {
   const limitArg = args.find((a) => a.startsWith("--limit="));
   const limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : 500;
   const dryRun = args.includes("--dry-run");
+  const emptyOnly = args.includes("--empty-only");
 
   const configs = await buildSeriesConfigs(targetId);
 
   for (const config of configs) {
     if (targetId && config.anilistId !== targetId) continue;
-    const media = await prisma.media.findUnique({ where: { anilistId: config.anilistId } });
+    const media = await prisma.media.findUnique({
+      where: { anilistId: config.anilistId },
+      include: { _count: { select: { characters: true } } },
+    });
     if (!media) continue;
+    if (emptyOnly && media._count.characters > 0) continue;
 
     // Primary source: the series' own Fandom wiki category.
     if (config.fandomWiki) {
