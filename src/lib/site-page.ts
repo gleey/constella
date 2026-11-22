@@ -26,7 +26,7 @@ Atribusi Sumber Data & Lisensi (Wajib):
 - Fandom Community Wikis: Kredit penuh untuk sumber teks profil karakter, biografi, dan deskripsi arc di bawah lisensi Creative Commons Attribution-ShareAlike (CC-BY-SA 3.0). Penemuan wiki dilakukan melalui layanan pencarian resmi Fandom (services.fandom.com/unified-search).
 - Wikipedia (en.wikipedia.org): Sumber cadangan untuk artikel "List of ... characters" dan bagian karakter pada artikel seri, di bawah lisensi Creative Commons Attribution-ShareAlike 4.0 (CC BY-SA 4.0). Digunakan ketika sebuah seri tidak memiliki wiki Fandom yang memadai.
 - Kitsu API (kitsu.io): Sumber cadangan untuk daftar karakter per media, nama alternatif, potret karakter, dan bio singkat. Digunakan ketika wiki Fandom maupun Wikipedia tidak tersedia. Kitsu juga menjadi sumber status rilis dan verifikasi identitas seri melalui mapping "anilist/manga".
-- MangaUpdates API (api.mangaupdates.com): Sumber jumlah bab terkini untuk seri yang masih_Ongoing, ketika AniList tidak menyediakan angka (AniList melaporkan chapters: null untuk seri yang belum tamat).
+- MangaUpdates API (api.mangaupdates.com): Sumber jumlah bab terkini untuk seri yang masih ongoing, ketika AniList tidak menyediakan angka (AniList melaporkan chapters: null untuk seri yang belum tamat).
 
 Semua teks dari sumber cadangan (Wikipedia dan Kitsu) diproses melalui pipeline ekstraksi AI yang sama seperti wikitext Fandom, sehingga batas bab temporal tetap ditegakkan secara identik. Tidak ada konten berhak cipta yang ditampilkan mentah; hanya data terstruktur hasil ekstraksi yang disimpan.
 
