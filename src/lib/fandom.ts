@@ -334,10 +334,14 @@ export async function resolveFandomWikiSubdomain(
 
   const cleanTitle = (raw: string) =>
     raw
-      .replace(/['’]/g, "")
+      .replace(/['']/g, "")
       .replace(/,/g, "")
       .replace(/\([^)]*\)/g, "")
       .replace(/\[[^\]]*\]/g, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // strip diacritics: Pokémon → Pokemon, Märchen → Marchen
+      .replace(/ñ/g, "n")
+      .replace(/ç/g, "c")
       .trim();
 
   const toSlug = (str: string) =>
@@ -347,6 +351,31 @@ export async function resolveFandomWikiSubdomain(
 
   const cleaned = cleanTitle(seriesTitle);
   const candidates: string[] = [];
+
+  // Generate romanization variants for common Japanese vowel patterns.
+  // Many Fandom wikis use romaji subdomains with doubled vowels (e.g. "haikyuu" not "haikyu",
+  // "yuuyuu" not "yuyu", "shuumatsu" not "shumatsu"). Also handle "ou"→"o", "uu"→"u" reverse.
+  const generateRomajiVariants = (slug: string): string[] => {
+    const variants: string[] = [];
+    // Double single vowels: a→aa, i→ii, u→uu, e→ee, o→oo
+    // Only apply to the last word segment (most romaji doubling is on final vowel)
+    const parts = slug.split("-");
+    if (parts.length > 0) {
+      const last = parts[parts.length - 1];
+      const otherParts = parts.slice(0, -1).join("-");
+      // Try doubling the last vowel if the word ends in a single vowel
+      const m = last.match(/([aiueo])([^aiueo]*)$/);
+      if (m) {
+        const doubled = last.replace(/([aiueo])([^aiueo]*)$/, (match, v, rest) => v + v + rest);
+        variants.push(otherParts ? `${otherParts}-${doubled}` : doubled);
+      }
+      // "ou" → "o" (e.g. "shuumatsukoukoku" might be "shumatsukokoku")
+      if (last.includes("ou")) {
+        variants.push(otherParts ? `${otherParts}-${last.replace(/ou/g, "o")}` : last.replace(/ou/g, "o"));
+      }
+    }
+    return variants;
+  };
 
   // Acronyms (e.g., "The Beginning After the End" -> "tbate", "Omniscient Reader's Viewpoint" -> "orv")
   const allWords = cleaned.split(/\s+/).filter(Boolean);
@@ -362,6 +391,64 @@ export async function resolveFandomWikiSubdomain(
   const baseSlug = toSlug(cleaned);
   candidates.push(baseSlug);
   candidates.push(toNoHyphen(cleaned));
+
+  // Romaji variants: try doubled vowels and "ou"→"o" conversions
+  // e.g. "haikyu" → "haikyuu", "baki" → "bakii", etc.
+  for (const variant of generateRomajiVariants(baseSlug)) {
+    candidates.push(variant);
+  }
+  for (const variant of generateRomajiVariants(toNoHyphen(cleaned))) {
+    candidates.push(variant);
+  }
+
+  // Progressive truncation: try shorter versions of multi-word slugs
+  // e.g. "grand-blue-dreaming" → "grand-blue", "welcome-to-demon-school-iruma-kun" → "welcome-to-demon-school"
+  // This handles cases where Fandom wikis use truncated series titles
+  if (baseSlug.includes("-")) {
+    const slugParts = baseSlug.split("-").filter(Boolean);
+    if (slugParts.length >= 3) {
+      // Try progressively shorter versions (remove last word each time)
+      for (let len = slugParts.length - 1; len >= 2; len--) {
+        candidates.push(slugParts.slice(0, len).join("-"));
+      }
+    }
+  }
+
+  // Unicode normalization is handled in cleanTitle (NFD decomposition).
+  // baseSlug and toNoHyphen(cleaned) already use ASCII-normalized text.
+  // For synonyms that might contain accented characters, also generate ASCII variants inline.
+
+  // Distinctive last word: for titles like "Goodnight Punpun" where the wiki is just "punpun",
+  // try the last word as a standalone candidate. These are deprioritized (added to shortAcronyms)
+  // to be tried only after all full-slug candidates have been exhausted, and are accepted only
+  // under very strict verification to avoid mega-franchise false positives like "pokemon" or "friends".
+  const COMMON_WORDS = new Set([
+    "adventures", "friends", "hero", "heroes", "school", "academy", "love", "war", "world", "life",
+    "story", "tales", "chronicles", "legends", "dream", "dreams", "magic", "power", "powers",
+    "game", "games", "online", "fantasy", "romance", "comedy", "drama", "action", "mystery",
+    "monster", "monsters", "dragon", "dragons", "demon", "demons", "angel", "angels", "god", "gods",
+    "king", "kings", "queen", "queens", "prince", "princess", "knight", "knights", "samurai", "ninja",
+  ]);
+  const lastWordCandidates: string[] = [];
+  if (allWords.length >= 2) {
+    const lastWord = allWords[allWords.length - 1];
+    const lastSlug = toSlug(lastWord);
+    if (lastSlug.length >= 4 && !COMMON_WORDS.has(lastSlug)) {
+      lastWordCandidates.push(lastSlug);
+      lastWordCandidates.push(toNoHyphen(lastWord));
+    }
+    // Also try first word for cases like "Homunculus" (single wiki matches first word)
+    const firstWord = allWords[0];
+    const firstSlug = toSlug(firstWord);
+    if (firstSlug.length >= 4 && firstSlug !== lastSlug && !COMMON_WORDS.has(firstSlug)) {
+      lastWordCandidates.push(firstSlug);
+    }
+  }
+
+  // Single-word candidates (acronyms and last-word fallbacks) are dangerous because they can match
+  // huge unrelated franchise wikis ("pokemon", "friends", "marvel", etc.). Mark them so the resolver
+  // can apply strict verification.
+  const singleWordCandidates = new Set(lastWordCandidates);
 
   // Stripped prefixes (e.g., "the-", "solo-", "im-the-", "i-am-the-", "revenge-of-the-")
   const prefixes = [/^the-/, /^solo-/, /^im-the-/, /^i-am-the-/, /^revenge-of-the-/, /^revenge-of-/];
@@ -430,6 +517,14 @@ export async function resolveFandomWikiSubdomain(
     candidates.push(synSlug);
     candidates.push(toNoHyphen(cSyn));
 
+    // Romaji variants for synonyms too
+    for (const variant of generateRomajiVariants(synSlug)) {
+      candidates.push(variant);
+    }
+    for (const variant of generateRomajiVariants(toNoHyphen(cSyn))) {
+      candidates.push(variant);
+    }
+
     const synWords = cSyn.split(/\s+/).filter(Boolean);
     if (synWords.length > 1) {
       candidates.push(synWords.map((w) => w[0]?.toLowerCase()).join(""));
@@ -477,7 +572,8 @@ export async function resolveFandomWikiSubdomain(
       longCandidates.push(c);
     }
   }
-  const uniqueCandidates = [...longCandidates, ...shortAcronyms];
+  // Last-word candidates are tried after everything else (they're low-priority fallbacks)
+  const uniqueCandidates = [...longCandidates, ...shortAcronyms, ...lastWordCandidates];
 
   let bestCand: string | null = null;
   let maxArticles = -1;
@@ -485,6 +581,11 @@ export async function resolveFandomWikiSubdomain(
 
   for (const cand of uniqueCandidates) {
     try {
+      // Single-word candidates (last-word fallbacks) must pass strict verification:
+      // the sitename/mainpage must contain the EXACT word or the series title,
+      // and the wiki must not be a mega-franchise that happens to share a word.
+      const isSingleWordFallback = singleWordCandidates.has(cand);
+
       // If we already found a decent match, skip short acronyms (likely false positives)
       if (cand.length <= 3 && bestCand && maxArticles >= 10) continue;
 
@@ -517,19 +618,35 @@ export async function resolveFandomWikiSubdomain(
             sitenameLower.includes(toSlug(seriesTitle)) ||
             toSlug(seriesTitle).includes(sitenameLower.replace(/\s+/g, "-"));
 
-          // For short acronyms (<= 4 chars), require strict relevance — the sitename must contain
-          // a token from the title to avoid matching large unrelated wikis (e.g. "ac" → Assassin's Creed)
+          // For short acronyms (<= 4 chars), require strict relevance
           if (cand.length <= 4 && !isRelevant) continue;
 
+          // For single-word fallbacks (e.g. "punpun", "pokemon"), require that the sitename
+          // is specifically about this series — not a mega-franchise that shares a word.
+          if (isSingleWordFallback) {
+            const exactWordMatch = sitenameLower === cand.toLowerCase() ||
+              sitenameLower === `${cand.toLowerCase()} wiki` ||
+              sitenameLower.includes(toSlug(seriesTitle)) ||
+              mainpage.toLowerCase().includes(toSlug(seriesTitle));
+            // If the exact title isn't in the sitename, only accept small single-word wikis
+            // (< 1000 articles) where the sitename actually contains the word.
+            // This prevents mega-franchises like "pokemon" (38k articles) or "friends" (1.6k)
+            // while allowing genuine small wikis like "punpun" (143 articles).
+            const isSmallDistinctiveWiki = articles < 1000 &&
+              (sitenameLower.includes(cand.toLowerCase()) || mainpage.toLowerCase().includes(cand.toLowerCase()));
+            if (!exactWordMatch && !isSmallDistinctiveWiki) continue;
+          }
+
           // For longer candidates that pass relevance, also do content-based verification
-          // to ensure the wiki actually has manga/manhwa content about this series
           const isVerified = isRelevant
             ? await verifyWikiHasSeriesContent(cand, seriesTitle, synonyms)
             : articles > 500; // big wikis get benefit of the doubt if relevant
 
+          // Single-word fallbacks additionally require content verification to pass
+          if (isSingleWordFallback && !isVerified) continue;
+
           // Prefer verified results over unverified ones
           if (isVerified && !bestVerified) {
-            // This is the first verified result — take it immediately
             bestCand = cand;
             maxArticles = articles;
             bestVerified = true;
@@ -542,7 +659,6 @@ export async function resolveFandomWikiSubdomain(
           if (articles > maxArticles) {
             maxArticles = articles;
             bestCand = cand;
-            // If it's a huge established wiki (> 500 articles), accept immediately
             if (articles > 500 && isVerified) {
               break;
             }
