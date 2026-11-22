@@ -25,6 +25,7 @@ import { resolveCharacterName } from "./name-resolution";
 import { fetchAltCharacterText, fetchAltCharacterRoster } from "./alt-sources";
 import { normalizeName, shouldMergeCharacters, canonicalizeName } from "./name-dedupe";
 import { validateTemporalBounds } from "./temporal";
+import { resolveTotalChapters } from "./chapter-count";
 import { isBrokenImageUrl } from "./auto-sync";
 import { GoogleGenAI } from "@google/genai";
 
@@ -148,6 +149,19 @@ async function runCatalogSync(targetAnilistId?: number) {
 
       globalState.currentSeries = anilistDetail.title;
 
+      // Chapter count: AniList is null for ongoing series, so resolve through
+      // Kitsu/MangaUpdates and keep the previously known value as a floor.
+      // This replaces the old static `|| 100` placeholder.
+      const previousMedia = await prisma.media.findUnique({
+        where: { anilistId: anilistDetail.id },
+        select: { totalChapters: true },
+      });
+      const { totalChapters: resolvedTotalChapters, source: chapterSource } =
+        await resolveTotalChapters(anilistDetail, previousMedia?.totalChapters);
+      if (chapterSource === "live") {
+        addLog(`Chapter live untuk ${anilistDetail.title}: ${resolvedTotalChapters} (AniList belum punya angka).`);
+      }
+
       // Upsert Media with live cover and chapters
       const media = await prisma.media.upsert({
         where: { anilistId: anilistDetail.id },
@@ -156,7 +170,7 @@ async function runCatalogSync(targetAnilistId?: number) {
           title: anilistDetail.title,
           type: anilistDetail.countryOfOrigin === "KR" ? "MANHWA" : "MANGA",
           coverImage: anilistDetail.coverImage,
-          totalChapters: anilistDetail.chapters || 100,
+          totalChapters: resolvedTotalChapters,
           chapterNumberingSource: "official_en",
           countryOfOrigin: anilistDetail.countryOfOrigin || "KR",
           status: anilistDetail.status,
@@ -166,7 +180,7 @@ async function runCatalogSync(targetAnilistId?: number) {
         update: {
           title: anilistDetail.title,
           coverImage: anilistDetail.coverImage,
-          totalChapters: anilistDetail.chapters && anilistDetail.chapters > 0 ? anilistDetail.chapters : undefined,
+          totalChapters: resolvedTotalChapters,
           status: anilistDetail.status !== "RELEASING" ? anilistDetail.status : undefined,
           contentRating: anilistDetail.contentRating,
           genres: anilistDetail.genres,
@@ -285,7 +299,7 @@ async function runCatalogSync(targetAnilistId?: number) {
       // First, calculate estimated introduction chapters based on role and order
       const mainChars = charactersToSync.filter((c) => c.role === "MAIN");
       const supportingChars = charactersToSync.filter((c) => c.role !== "MAIN");
-      const totalChapters = anilistDetail.chapters && anilistDetail.chapters > 0 ? anilistDetail.chapters : 100;
+      const totalChapters = resolvedTotalChapters;
 
       // Estimate introduction chapter: MAIN = 1, SUPPORTING distributed across early chapters
       const charIntroMap = new Map<string, number>();

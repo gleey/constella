@@ -1,12 +1,32 @@
+/**
+ * Backfill live chapter counts for ongoing series that still carry the
+ * static 100-chapter placeholder.
+ *
+ * AniList reports `chapters: null` for series that are still releasing, so
+ * those rows used to be seeded with a placeholder. The live sources
+ * (Kitsu → MangaUpdates) now supply a real count; this script applies it.
+ *
+ * Usage:
+ *   npx tsx -r dotenv/config scripts/backfill-live-chapters.ts
+ */
+
 import { prisma } from "../src/lib/prisma";
-import { fetchLiveChapterCount } from "../src/lib/live-chapters";
+import { fetchLiveMangaInfo } from "../src/lib/live-chapters";
+import { fetchMediaDetail, mediaTitleForms } from "../src/lib/anilist";
 
 async function main() {
   console.log("=== Backfilling Live Chapter Counts for Releasing Media ===");
 
   const releasingMedia = await prisma.media.findMany({
-    where: { status: "RELEASING", totalChapters: 100 },
-    select: { id: true, title: true, totalChapters: true },
+    where: { status: "RELEASING" },
+    select: {
+      id: true,
+      title: true,
+      totalChapters: true,
+      anilistId: true,
+      type: true,
+      countryOfOrigin: true,
+    },
     orderBy: { title: "asc" },
   });
 
@@ -15,6 +35,7 @@ async function main() {
   let updated = 0;
   let unchanged = 0;
   let notFound = 0;
+  let skipped = 0;
 
   const BATCH_SIZE = 4;
   for (let i = 0; i < releasingMedia.length; i += BATCH_SIZE) {
@@ -23,7 +44,32 @@ async function main() {
     await Promise.all(
       batch.map(async (m) => {
         try {
-          const liveCount = await fetchLiveChapterCount(m.title);
+          // Title forms come from AniList (romaji/english/synonyms); MangaUpdates
+          // and Kitsu both match on exact titles, so all forms widen the hit rate.
+          let forms: string[] = [m.title];
+          let anilistChapters: number | null = null;
+          try {
+            const detail = await fetchMediaDetail(m.anilistId);
+            forms = mediaTitleForms(detail);
+            anilistChapters = detail.chapters && detail.chapters > 0 ? detail.chapters : null;
+          } catch {
+            // AniList unavailable — fall back to the stored title alone.
+          }
+
+          // AniList knows the exact length of finished series; never override it.
+          if (anilistChapters) {
+            skipped++;
+            return;
+          }
+
+          const live = await fetchLiveMangaInfo(
+            m.title,
+            m.anilistId,
+            forms,
+            m.countryOfOrigin === "KR" ? "MANHWA" : "MANGA",
+          );
+          const liveCount = live?.chapters ?? null;
+
           if (liveCount && liveCount > 0) {
             if (liveCount !== m.totalChapters) {
               await prisma.media.update({
@@ -56,6 +102,7 @@ async function main() {
   console.log(`Total releasing: ${releasingMedia.length}`);
   console.log(`Updated with live counts: ${updated}`);
   console.log(`Already accurate / unchanged: ${unchanged}`);
+  console.log(`Skipped (AniList knows the count): ${skipped}`);
   console.log(`Unresolved / kept fallback: ${notFound}`);
 }
 

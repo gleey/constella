@@ -28,6 +28,7 @@ import { prisma } from "../src/lib/prisma";
 import { fetchPopularMedia, fetchMediaDetail } from "../src/lib/anilist";
 import { resolveCharacterName } from "../src/lib/name-resolution";
 import { normalizeName } from "../src/lib/name-dedupe";
+import { resolveTotalChapters } from "../src/lib/chapter-count";
 
 interface CliOptions {
   pages: number;
@@ -149,13 +150,14 @@ async function main() {
         continue;
       }
 
+      const { totalChapters } = await resolveTotalChapters(detail);
       const media = await prisma.media.create({
         data: {
           anilistId: detail.id,
           title: detail.title,
           type: detail.countryOfOrigin === "KR" ? "MANHWA" : "MANGA",
           coverImage: detail.coverImage,
-          totalChapters: detail.chapters && detail.chapters > 0 ? detail.chapters : 100,
+          totalChapters,
           chapterNumberingSource: "official_en",
           countryOfOrigin: detail.countryOfOrigin || opts.country,
         },

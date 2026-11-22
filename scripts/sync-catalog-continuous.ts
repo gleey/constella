@@ -17,6 +17,7 @@
 import { prisma } from "../src/lib/prisma";
 import { fetchPopularMediaPage } from "../src/lib/anilist";
 import { importCatalog, syncOngoingReleases } from "../src/lib/catalog-import";
+import { resolveTotalChapters } from "../src/lib/chapter-count";
 
 // Safe rate limit delay: 800ms between requests keeps req/min at ~75 (safe under 90 cap)
 const SAFE_DELAY_MS = 800;
@@ -76,15 +77,23 @@ async function runCatalogCycle() {
         for (const item of discovery.results) {
           if (!item.title || !item.coverImage) continue;
 
-          const chapters =
-            typeof item.chapters === "number" && item.chapters > 0
-              ? item.chapters
-              : 100;
-
           const existing = await prisma.media.findUnique({
             where: { anilistId: item.id },
-            select: { id: true },
+            select: { id: true, totalChapters: true },
           });
+
+          const { totalChapters: chapters } = await resolveTotalChapters(
+            {
+              id: item.id,
+              title: item.title,
+              chapters: item.chapters,
+              countryOfOrigin: item.countryOfOrigin,
+              romajiTitle: item.romajiTitle,
+              englishTitle: item.englishTitle,
+              synonyms: item.synonyms,
+            },
+            existing?.totalChapters,
+          );
 
           if (existing) {
             await prisma.media.update({
