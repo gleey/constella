@@ -139,6 +139,39 @@ export default function Footer() {
               </a>
               .
             </p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Fallback character sources:{" "}
+              <a
+                href="https://en.wikipedia.org"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-300 hover:text-indigo-300 underline underline-offset-2"
+              >
+                Wikipedia
+              </a>{" "}
+              (CC-BY-SA 4.0) and{" "}
+              <a
+                href="https://kitsu.io"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-300 hover:text-indigo-300 underline underline-offset-2"
+              >
+                Kitsu
+              </a>{" "}
+              (rosters, aliases, portraits, release status).
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Live chapter counts for ongoing series come from{" "}
+              <a
+                href="https://www.mangaupdates.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-300 hover:text-indigo-300 underline underline-offset-2"
+              >
+                MangaUpdates
+              </a>
+              .
+            </p>
           </div>
         </div>
 

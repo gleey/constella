@@ -89,6 +89,14 @@ constella/
 │   ├── seed-popular.ts      # Tier 1: Bulk catalog seeder AniList (tanpa AI)
 │   ├── enrich-fandom.ts     # Tier 2: Dynamic Fandom category & wikitext extraction
 │   ├── enrich-all.ts        # Tier 3: Batch lore enrichment (AniList + Fandom + Gemini)
+│   ├── ingest-fandom-cast.ts# Ingest roster karakter dari wiki Fandom ke tabel review
+│   ├── backfill-live-chapters.ts # Backfill jumlah bab live (MangaUpdates) untuk seri releasing
+│   ├── backfill-live-statuses.ts # Backfill status rilis live (Kitsu)
+│   ├── backfill-ratings-and-status.ts # Backfill rating & status rilis dari AniList
+│   ├── audit-wiki-resolution.ts   # Audit resolusi wiki seluruh katalog (--min-chars=N)
+│   ├── fix-factions.ts      # Perbaikan relasi faksi karakter
+│   ├── remove-duplicates.ts # Pembersihan duplikat nama karakter
+│   ├── series-config.ts     # Konfigurasi override metadata seri
 │   ├── run-background-daemon.ts # Daemon otomatis sinkronisasi berkala (interval 6 jam)
 │   └── sync-all-live-images.ts  # Utility perbaikan aset foto resolusi tinggi
 ├── src/
@@ -108,7 +116,7 @@ constella/
 │   │   └── page.tsx         # Katalog media & beranda utama
 │   ├── components/
 │   │   ├── AdminDrawer.tsx  # Quick admin management drawer
-│   │   ├── ChapterDropdown.tsx & ChapterSlider.tsx # Kontrol pemilihan bab
+│   │   ├── ChapterSlider.tsx   # Kontrol pemilihan bab
 │   │   ├── CharacterModal.tsx    # Modal detail profil, status, & timeline karakter
 │   │   ├── CharacterSearch.tsx   # Fitur pencarian instan karakter pada kanvas
 │   │   ├── FloatingPanel.tsx     # Panel navigasi melayang & statistik graf
@@ -120,14 +128,22 @@ constella/
 │   ├── generated/prisma/    # Prisma client yang di-generate otomatis
 │   └── lib/
 │       ├── admin-auth.ts      # Utilitas otorisasi admin (ADMIN_SECRET via header/cookie)
+│       ├── alt-sources.ts     # Sumber karakter cadangan (Wikipedia + Kitsu)
 │       ├── anilist.ts         # GraphQL client AniList (katalog judul, cover, karakter)
+│       ├── api-cache.ts       # Cache respons API eksternal (TTL in-memory)
+│       ├── auto-sync.ts       # Orkestrasi sinkronisasi otomatis per-katalog
+│       ├── background-sync.ts # Engine sinkronisasi berkala otomatis
+│       ├── catalog-import.ts  # Impor katalog + enrichment jumlah bab
+│       ├── chapter-count.ts   # Resolusi jumlah bab (AniList → live → tersimpan → fallback)
 │       ├── fandom.ts          # Scraper MediaWiki Fandom (paginasi kategori & infobox)
 │       ├── gemini.ts          # Gemini AI extractor (JSON schema, fallback chain ke Groq)
+│       ├── kitsu-chapters.ts  # Lookup Kitsu (status rilis + verifikasi mapping anilist/manga)
+│       ├── live-chapters.ts   # Resolusi jumlah bab live via MangaUpdates & Kitsu
 │       ├── middleware.ts      # Next.js middleware proteksi endpoint admin & mutasi
 │       ├── name-dedupe.ts     # Normalisasi nama & heuristik penggabungan duplikat
 │       ├── name-resolution.ts # Resolusi target nama LLM ke database Foreign Key
 │       ├── temporal.ts        # Validasi batasan waktu temporal validFrom/validUntil
-│       ├── background-sync.ts # Engine sinkronisasi berkala otomatis
+│       ├── types.ts           # Shared TypeScript types
 │       ├── site-page.ts       # CMS halaman statis (about, methodology) editable via admin
 │       └── prisma.ts          # Prisma client singleton
 ├── tests/
@@ -242,6 +258,13 @@ Proyek ini menyediakan serangkaian skrip CLI untuk manajemen data katalog dan ek
 | `npx tsx -r dotenv/config scripts/seed-popular.ts` | **Tier 1:** Bulk ingest katalog judul populer dari AniList (tanpa AI) | `--pages=2`<br>`--perPage=20`<br>`--limit=40`<br>`--dry-run` |
 | `npx tsx -r dotenv/config scripts/enrich-fandom.ts` | **Tier 2:** Ekstraksi dinamis kategori Fandom ke tabel review | `--title="Solo Leveling"`<br>`--limit=30`<br>`--dry-run` |
 | `npx tsx -r dotenv/config scripts/enrich-all.ts` | **Tier 3:** Batch lore enrichment komprehensif langsung ke DB | `--mediaId=<uuid>`<br>`--series=<slug>` |
+| `npx tsx -r dotenv/config scripts/ingest-fandom-cast.ts` | Ingest roster karakter dari wiki Fandom ke tabel review | `mediaId=<anilistId>`<br>`--limit=100`<br>`--dry-run` |
+| `npx tsx -r dotenv/config scripts/backfill-live-chapters.ts` | Backfill jumlah bab live (MangaUpdates) untuk seri yang masih *releasing* | `-` |
+| `npx tsx -r dotenv/config scripts/backfill-live-statuses.ts` | Backfix status rilis media via AniList (authoritative by `anilistId`) | `-` |
+| `npx tsx -r dotenv/config scripts/backfill-ratings-and-status.ts` | Backfill rating konten & status rilis seluruh media via AniList | `-` |
+| `npx tsx -r dotenv/config scripts/audit-wiki-resolution.ts` | Audit resolusi wiki seluruh katalog (deteksi seri tanpa karakter) | `--min-chars=5` |
+
+> Semua skrip yang menyentuh database atau API eksternal wajib dijalankan lewat `npx tsx -r dotenv/config scripts/<nama>.ts` agar variabel dari `.env` termuat.
 
 ---
 
@@ -327,12 +350,19 @@ Hak Cipta Dilindungi Undang-Undang.
 
 ### Atribusi Sumber Data (Wajib)
 
-Constella menyandarkan data pada dua sumber publik berikut dan wajib mencantumkan kreditnya:
+Constella menyandarkan data pada sumber publik berikut dan wajib mencantumkan kreditnya:
 
 | Sumber | Kontribusi | Lisensi |
 |---|---|---|
 | **[AniList GraphQL API](https://anilist.co)** | Metadata judul, sampul resmi, genre, negara asal, dan status rilis manga/manhwa | ToS AniList (non-commercial) |
-| **[Fandom Community Wikis](https://fandom.com)** | Teks profil karakter, biografi, dan ringkasan alur cerita | [CC-BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
+| **[Fandom Community Wikis](https://fandom.com)** | Teks profil karakter, biografi, dan ringkasan alur cerita. Penemuan wiki melalui layanan pencarian resmi `services.fandom.com/unified-search` | [CC-BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
+| **[Wikipedia](https://en.wikipedia.org)** | Sumber cadangan karakter: artikel "List of ... characters" dan bagian karakter pada artikel seri, ketika wiki Fandom tidak memadai | [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| **[Kitsu API](https://kitsu.io)** | Sumber cadangan daftar karakter per media, nama alternatif, potret karakter, dan bio singkat; juga status rilis dan verifikasi identitas seri via mapping `anilist/manga` | Kitsu ToS (community database) |
+| **[MangaUpdates API](https://www.mangaupdates.com)** | Jumlah bab terkini untuk seri yang masih *ongoing* (AniList melaporkan `chapters: null` untuk seri yang belum tamat) | MangaUpdates ToS |
+
+**Urutan sumber karakter:** wiki Fandom (dedicated) → section hub Fandom → artikel karakter Wikipedia → bio Kitsu → sintesis AI murni. Teks dari sumber mana pun melewati tahap ekstraksi AI yang sama, sehingga batas bab temporal tetap ditegakkan identik.
+
+**Urutan jumlah bab:** AniList → MangaUpdates → nilai tersimpan → *floor* 100 (hanya bila semua sumber gagal).
 
 Atribusi lengkap dapat dilihat pada halaman `/about` dan footer global yang tampil di seluruh halaman.
 
