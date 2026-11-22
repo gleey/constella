@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import StatusClient from "@/components/StatusClient";
+import { getBackgroundSyncStatus } from "@/lib/background-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,21 @@ const TIER_DESCRIPTIONS = {
   tier1: "Hanya metadata katalog dasar (judul, cover, genre, status rilis) dari AniList. Lore & relasi belum diisi.",
 } as const;
 
+function formatRelativeTime(isoString: string | null): string {
+  if (!isoString) return "Belum pernah";
+  const date = new Date(isoString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffMin < 1) return "Baru saja";
+  if (diffMin < 60) return `${diffMin} menit lalu`;
+  if (diffHr < 24) return `${diffHr} jam lalu`;
+  if (diffDay < 7) return `${diffDay} hari lalu`;
+  return date.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+}
+
 export default async function StatusPage() {
   const allMedia = await prisma.media.findMany({
     select: {
@@ -72,6 +88,8 @@ export default async function StatusPage() {
     tier2: mediaWithCoverage.filter((m) => getTier(m) === "tier2").length,
     tier1: mediaWithCoverage.filter((m) => getTier(m) === "tier1").length,
   };
+
+  const syncStatus = getBackgroundSyncStatus();
 
   return (
     <div className="min-h-screen bg-[#0b0f19] aurora text-slate-100">
@@ -133,6 +151,59 @@ export default async function StatusPage() {
               <div className="mt-2 text-3xl sm:text-4xl font-bold text-white">{s.value}</div>
             </div>
           ))}
+        </div>
+
+        {/* Sync Status */}
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="p-4 rounded-xl bg-[#111827] ring-1 ring-white/5">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Sync Katalog (Tier 1)
+                </span>
+              </div>
+              {syncStatus.syncMode === "catalog" && syncStatus.isRunning && (
+                <span className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                  BERJALAN {syncStatus.progress}%
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-white font-semibold">
+              {formatRelativeTime(syncStatus.lastCatalogSync)}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              AniList + Fandom, tanpa AI. Update cover, chapter, karakter.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-xl bg-[#111827] ring-1 ring-white/5">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Sync Relasi & Lore (Tier 2)
+                </span>
+              </div>
+              {syncStatus.syncMode === "lore" && syncStatus.isRunning && (
+                <span className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  BERJALAN {syncStatus.progress}%
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-white font-semibold">
+              {formatRelativeTime(syncStatus.lastLoreSync)}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              AI-powered (Gemini/Groq). Deskripsi, status, relasi, faksi.
+            </p>
+          </div>
         </div>
 
         {/* Tier Legend */}

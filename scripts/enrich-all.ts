@@ -215,10 +215,15 @@ async function enrichMedia(config: SeriesMapping) {
       continue;
     }
 
-    // Idempotent: lewati karakter yang sudah punya deskripsi (hemat biaya LLM).
-    const existingDesc = await prisma.characterDescription.findFirst({ where: { characterId: dbChar.id } });
+    // Idempotent: lewati karakter yang sudah punya lore AI (bukan placeholder auto-sync).
+    const existingDesc = await prisma.characterDescription.findFirst({
+      where: {
+        characterId: dbChar.id,
+        NOT: { text: { contains: "is a character featured in" } },
+      },
+    });
     if (existingDesc) {
-      console.log(`[SKIP] ${charName} sudah berlore — lewati.`);
+      console.log(`[SKIP] ${charName} sudah berlore AI — lewati.`);
       continue;
     }
 

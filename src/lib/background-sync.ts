@@ -43,6 +43,8 @@ export interface BackgroundSyncState {
   completedSeries: number;
   logs: string[];
   lastError: string | null;
+  lastCatalogSync: string | null;
+  lastLoreSync: string | null;
 }
 
 const globalState: BackgroundSyncState = {
@@ -57,6 +59,8 @@ const globalState: BackgroundSyncState = {
   completedSeries: 0,
   logs: [],
   lastError: null,
+  lastCatalogSync: null,
+  lastLoreSync: null,
 };
 
 function addLog(msg: string) {
@@ -792,11 +796,17 @@ async function runLoreSync(targetAnilistId?: number) {
 // ---------------------------------------------------------------------------
 
 function finishSync() {
+  const finishedAt = new Date().toISOString();
   globalState.isRunning = false;
-  globalState.finishedAt = new Date().toISOString();
+  globalState.finishedAt = finishedAt;
   globalState.currentSeries = "";
   globalState.currentCharacter = "";
   globalState.progress = 100;
+  if (globalState.syncMode === "catalog") {
+    globalState.lastCatalogSync = finishedAt;
+  } else if (globalState.syncMode === "lore") {
+    globalState.lastLoreSync = finishedAt;
+  }
   globalState.syncMode = null;
 }
 
@@ -870,22 +880,26 @@ export function startBackgroundSync(targetAnilistId?: number): { started: boolea
 }
 
 // ---------------------------------------------------------------------------
-// Background Daemon — runs Tier 1 ONLY (no AI tokens)
+// Background Daemon — runs Tier 1 (catalog) automatically + Tier 2 (lore) optionally
 // ---------------------------------------------------------------------------
 
 let daemonStarted = false;
 
 /**
  * Background daemon that auto-runs catalog sync on startup + periodic intervals.
- * Only Tier 1 (catalog sync) — NO AI token consumption.
+ * Tier 1 (catalog sync) always runs — NO AI token consumption.
+ * Tier 2 (lore sync) runs only if ENABLE_AUTO_LORE_SYNC="true" — CONSUMES AI TOKENS.
  */
 export function initBackgroundDaemon(intervalHours = 6) {
   if (daemonStarted) return;
   daemonStarted = true;
 
-  addLog(`Background daemon aktif (interval: ${intervalHours} jam). Hanya catalog sync (tanpa AI).`);
+  const autoLoreSync = process.env.ENABLE_AUTO_LORE_SYNC === "true";
+  const loreIntervalHours = parseInt(process.env.LORE_SYNC_INTERVAL_HOURS || "24", 10);
 
-  // Defer initial run by 8 seconds
+  addLog(`Background daemon aktif (catalog interval: ${intervalHours} jam). Tier 1 tanpa AI.${autoLoreSync ? ` Lore sync otomatis AKTIF setiap ${loreIntervalHours} jam (MEMAKAN TOKEN AI).` : " Lore sync manual (via admin panel)."}`);
+
+  // Defer initial catalog run by 8 seconds
   setTimeout(() => {
     if (!globalState.isRunning) {
       addLog("Menjalankan catalog sync otomatis awal...");
@@ -893,11 +907,29 @@ export function initBackgroundDaemon(intervalHours = 6) {
     }
   }, 8000);
 
-  // Periodic interval
+  // Periodic catalog interval (Tier 1 — no AI)
   setInterval(() => {
     if (!globalState.isRunning) {
       addLog(`Menjalankan catalog sync otomatis berkala (${intervalHours} jam)...`);
       startCatalogSync();
     }
   }, intervalHours * 60 * 60 * 1000);
+
+  // Periodic lore sync interval (Tier 2 — AI tokens, opt-in only)
+  if (autoLoreSync) {
+    // Defer initial lore sync by 30 seconds (after first catalog sync starts)
+    setTimeout(() => {
+      if (!globalState.isRunning) {
+        addLog("Menjalankan lore sync otomatis awal (AI-powered)...");
+        startLoreSync();
+      }
+    }, 30000);
+
+    setInterval(() => {
+      if (!globalState.isRunning) {
+        addLog(`Menjalankan lore sync otomatis berkala (${loreIntervalHours} jam, AI-powered)...`);
+        startLoreSync();
+      }
+    }, loreIntervalHours * 60 * 60 * 1000);
+  }
 }
