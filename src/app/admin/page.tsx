@@ -144,43 +144,20 @@ export default function AdminPage() {
     isSensitive: false,
   });
 
-  const [adminToken, setAdminToken] = useState<string>("");
   const [isTokenSet, setIsTokenSet] = useState<boolean>(true);
   const [showTokenInput, setShowTokenInput] = useState<boolean>(false);
 
   useEffect(() => {
+    // The session cookie is httpOnly — JS cannot read it. We only probe for a
+    // legacy readable cookie / localStorage token so the UI can decide whether
+    // to show the login prompt; actual authorization is enforced server-side.
     const match = document.cookie.match(/(?:^|;\s*)admin_token=([^;]+)/);
-    const existing = match ? decodeURIComponent(match[1]) : (typeof window !== "undefined" ? localStorage.getItem("admin_token") : "") || "";
-    if (existing) {
-      setAdminToken(existing);
-      setIsTokenSet(true);
-      // Cookie is already set server-side as httpOnly; nothing to write here.
-    } else {
-      setIsTokenSet(false);
-    }
-  }, []);
-
-  const handleSaveAdminToken = async (token: string) => {
-    const clean = token.trim();
-    if (!clean) return;
-    // Exchange the raw secret for a signed httpOnly cookie; never persist the
-    // secret in a readable cookie or localStorage.
-    const res = await fetch("/api/admin/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: clean }),
-    });
-    if (!res.ok) {
+    const legacy = match ? decodeURIComponent(match[1]) : (typeof window !== "undefined" ? localStorage.getItem("admin_token") : "") || "";
+    if (!legacy) {
       setIsTokenSet(false);
       setShowTokenInput(true);
-      return;
     }
-    setAdminToken("");
-    localStorage.removeItem("admin_token");
-    setIsTokenSet(true);
-    setShowTokenInput(false);
-    checkBgStatus();
-  };
+  }, []);
 
   const loadMedia = async () => {
     try {
@@ -678,10 +655,10 @@ export default function AdminPage() {
                     ? "bg-emerald-500/10 text-emerald-300 ring-emerald-500/20 hover:bg-emerald-500/20"
                     : "bg-amber-500/10 text-amber-300 ring-amber-500/25 hover:bg-amber-500/20"
                 }`}
-                title="Atur token admin (ADMIN_SECRET) untuk otorisasi API"
+                title="Login admin untuk otorisasi API"
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${isTokenSet ? "bg-emerald-400" : "bg-amber-400 animate-pulse"}`} />
-                <span>{isTokenSet ? "Token Active" : "Set Admin Token"}</span>
+                <span>{isTokenSet ? "Session Active" : "Login Admin"}</span>
               </button>
               <Link
                 href="/"
@@ -695,32 +672,24 @@ export default function AdminPage() {
           {showTokenInput && (
             <div className="mt-4 p-4 rounded-xl bg-white/[0.04] border border-white/10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs animate-fade-in">
               <div className="space-y-0.5">
-                <p className="font-semibold text-white">Admin Authentication Token</p>
+                <p className="font-semibold text-white">Login diperlukan</p>
                 <p className="text-slate-400 text-[11px]">
-                  Masukkan token sesuai <code className="text-indigo-300">ADMIN_SECRET</code> di environment server agar permintaan API diizinkan.
+                  Masuk dengan username &amp; password admin. Sesi disimpan aman sebagai cookie (httpOnly), tanpa menyimpan token di browser.
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <input
-                  type="password"
-                  value={adminToken}
-                  onChange={(e) => setAdminToken(e.target.value)}
-                  placeholder="Paste admin token..."
-                  className="px-3 py-1.5 rounded-lg bg-black/40 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-400 w-full sm:w-64"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleSaveAdminToken(adminToken)}
-                  className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors"
+                <Link
+                  href="/admin/login"
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors"
                 >
-                  Save Token
-                </button>
+                  Buka Halaman Login
+                </Link>
                 <button
                   type="button"
                   onClick={() => setShowTokenInput(false)}
                   className="px-2 py-1.5 text-slate-400 hover:text-slate-200 text-xs cursor-pointer"
                 >
-                  Cancel
+                  Tutup
                 </button>
               </div>
             </div>
