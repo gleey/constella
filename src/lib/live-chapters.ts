@@ -286,12 +286,19 @@ export async function fetchLiveMangaInfo(
     const uniqueForms = [...new Set(forms)];
 
     let bestRecord: any | null = null;
-    for (const form of uniqueForms) {
-      const searchRes = await requestIPv4("https://api.mangaupdates.com/v1/series/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ search: form, stype: "title" }),
-      });
+    // Query all title forms concurrently, then evaluate in original form order
+    // so the exact/primary form keeps priority over looser synonyms.
+    const searchResponses = await Promise.all(
+      uniqueForms.map((form) =>
+        requestIPv4("https://api.mangaupdates.com/v1/series/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ search: form, stype: "title" }),
+        })
+      )
+    );
+
+    for (const searchRes of searchResponses) {
       if (!searchRes.ok) {
         // 502/504 means the upstream is down — that is an outage, not a miss.
         noteMangaUpdatesFailure();

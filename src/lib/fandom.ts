@@ -111,26 +111,30 @@ const KNOWN_WIKI_SUBDOMAINS: Record<string, string> = {
  * dedicated wiki subdomains via |wiki=subdomain or [[w:c:subdomain:...]] tags.
  */
 async function findWikiFromHub(seriesTitle: string, synonyms: string[] = []): Promise<string | null> {
-  const titles = [seriesTitle, ...synonyms];
-  for (const t of titles) {
-    if (!t || typeof t !== "string") continue;
-    // Skip non-Latin scripts
-    if (/^[\p{Script=Han}\p{Script=Hangul}\p{Script=Katakana}\p{Script=Hiragana}\p{Script=Thai}]/u.test(t)) continue;
-    try {
-      const pageName = t.trim().replace(/\s+/g, "_");
-      const wt = await fetchWikitext("koreanwebtoons", pageName);
-      if (wt) {
-        const wikiMatch = wt.match(/\|wiki\s*=\s*([a-zA-Z0-9-]+)/i);
-        if (wikiMatch?.[1] && wikiMatch[1].trim().length > 1) {
-          return wikiMatch[1].trim().toLowerCase();
-        }
+  const titles = [seriesTitle, ...synonyms]
+    .filter((t): t is string => Boolean(t && typeof t === "string"))
+    .filter((t) => !/^[\p{Script=Han}\p{Script=Hangul}\p{Script=Katakana}\p{Script=Hiragana}\p{Script=Thai}]/u.test(t));
 
-        const interMatch = wt.match(/\[\[w:c:([a-zA-Z0-9-]+):/i);
-        if (interMatch?.[1] && interMatch[1].trim().length > 1) {
-          return interMatch[1].trim().toLowerCase();
-        }
-      }
-    } catch {}
+  // Fetch all candidate wikitexts concurrently, then evaluate in title order
+  // so the highest-priority (series title) match still wins.
+  const results = await Promise.allSettled(
+    titles.map(async (t) => {
+      const pageName = t.trim().replace(/\s+/g, "_");
+      return fetchWikitext("koreanwebtoons", pageName);
+    })
+  );
+
+  for (const r of results) {
+    if (r.status !== "fulfilled" || !r.value) continue;
+    const wt = r.value;
+    const wikiMatch = wt.match(/\|wiki\s*=\s*([a-zA-Z0-9-]+)/i);
+    if (wikiMatch?.[1] && wikiMatch[1].trim().length > 1) {
+      return wikiMatch[1].trim().toLowerCase();
+    }
+    const interMatch = wt.match(/\[\[w:c:([a-zA-Z0-9-]+):/i);
+    if (interMatch?.[1] && interMatch[1].trim().length > 1) {
+      return interMatch[1].trim().toLowerCase();
+    }
   }
   return null;
 }
@@ -148,82 +152,75 @@ export async function probeHubWikis(
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const titles = [seriesTitle, ...synonyms].filter(Boolean);
 
+  // Flatten (hub, title) pairs, preserving order so the first (highest-priority)
+  // match still wins after parallel evaluation.
+  const pairs: Array<{ hub: string; t: string }> = [];
   for (const hub of HUB_WIKIS) {
     for (const t of titles) {
       if (!t || t.length < 3) continue;
-      // Skip non-Latin scripts
       if (/^[\p{Script=Han}\p{Script=Hangul}\p{Script=Katakana}\p{Script=Hiragana}\p{Script=Thai}]/u.test(t)) continue;
+      pairs.push({ hub, t });
+    }
+  }
 
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2500);
-        const url = `https://${hub}.fandom.com/api.php?action=opensearch&search=${encodeURIComponent(t)}&limit=5&format=json`;
-        const res = await fetch(url, {
-          headers: { "User-Agent": "SpoilerFreeMap/1.0" },
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        if (!res.ok) continue;
+  /** Probe one (hub,title) pair via OpenSearch. Returns the hub#Page target or null. */
+  async function probePair(hub: string, t: string): Promise<string | null> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const url = `https://${hub}.fandom.com/api.php?action=opensearch&search=${encodeURIComponent(t)}&limit=5&format=json`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) return null;
 
-        const [, matches] = (await res.json()) as [string, string[]];
-        if (!Array.isArray(matches) || matches.length === 0) continue;
+      const [, matches] = (await res.json()) as [string, string[]];
+      if (!Array.isArray(matches) || matches.length === 0) return null;
 
-        const normTarget = normalize(t);
-        for (const match of matches) {
-          const normM = normalize(match);
+      const normTarget = normalize(t);
+      for (const match of matches) {
+        const normM = normalize(match);
+        const parenContent = match.match(/\(([^)]+)\)$/)?.[1]?.toLowerCase() || "";
 
-          // Reject character/episode pages — on VSBattles, character pages look like
-          // "Shiro (Classroom of the Elite)" or "Helmut Zemo (Marvel Cinematic Universe)"
-          // which are NOT series overview pages.
-          const parenContent = match.match(/\(([^)]+)\)$/)?.[1]?.toLowerCase() || "";
-
-          // On VSBattles specifically, be extra strict:
-          // Only accept pages that are clearly series/franchise pages (have "(Verse)" suffix)
-          // OR are exact title matches for long titles (>= 10 chars) without any parenthetical suffix.
-          // Short single-word titles like "Shark", "Helmut", "Passion" almost always match unrelated characters.
-          if (hub === "vsbattles") {
-            // Use word-boundary check to avoid "universe" matching "verse"
-            const isVersePage = /\bverse\b/.test(parenContent);
-            const isLongExact = normM === normTarget && normTarget.length >= 10 && !parenContent;
-            if (!isVersePage && !isLongExact) continue;
-          } else {
-            // For non-VSBattles hubs, reject character pages with parenthetical suffixes
-            const isCharacterPage = parenContent && !/\bverse\b/.test(parenContent) && !parenContent.includes("series");
-            if (isCharacterPage) continue;
-
-            // For short or single-word titles (<= 10 chars, no space), skip hub matching entirely.
-            // Single-word titles like "Happiness", "PASSION", "Shark" are too ambiguous on
-            // multi-series hub wikis — they frequently match unrelated series with the same name.
-            if (normTarget.length <= 10 && !t.includes(" ")) continue;
-          }
-
-          // Strict matching to prevent false positives:
-          // 1. Exact match (normalized) — e.g. "God of Blackfield" === "God of Blackfield"
-          // 2. For VSBattles, accept "(Verse)" suffix matches — e.g. "Dorohedoro (Verse)"
-          // 3. For titles >= 10 chars, allow substring match only if the match title
-          //    is NOT a character name from a different franchise.
-          //    This prevents "orange" → "ORANGE_MARMALADE" and "Shark" → "Shark" false positives.
-          const isExact = normM === normTarget;
-          const isVerseMatch = /\bverse\b/.test(parenContent) &&
-            normM.includes(normTarget) &&
-            !parenContent;
-
-          // For long titles (>= 10 chars), allow fuzzy match only if target is fully contained
-          // in the match AND the match doesn't look like a character from another franchise
-          const isLongMatch =
-            normTarget.length >= 10 &&
-            normM.includes(normTarget) &&
-            !parenContent && // no parenthetical suffix for fuzzy matches
-            // Reject if match is much longer than target (likely a different series)
-            normM.length <= normTarget.length + 15;
-
-          if (isExact || isVerseMatch || isLongMatch) {
-            return `${hub}#${match.replace(/\s+/g, "_")}`;
-          }
+        if (hub === "vsbattles") {
+          const isVersePage = /\bverse\b/.test(parenContent);
+          const isLongExact = normM === normTarget && normTarget.length >= 10 && !parenContent;
+          if (!isVersePage && !isLongExact) continue;
+        } else {
+          const isCharacterPage = parenContent && !/\bverse\b/.test(parenContent) && !parenContent.includes("series");
+          if (isCharacterPage) continue;
+          if (normTarget.length <= 10 && !t.includes(" ")) continue;
         }
-      } catch {
-        // continue to next hub or title
+
+        const isExact = normM === normTarget;
+        const isVerseMatch = /\bverse\b/.test(parenContent) &&
+          normM.includes(normTarget) &&
+          !parenContent;
+        const isLongMatch =
+          normTarget.length >= 10 &&
+          normM.includes(normTarget) &&
+          !parenContent &&
+          normM.length <= normTarget.length + 15;
+
+        if (isExact || isVerseMatch || isLongMatch) {
+          return `${hub}#${match.replace(/\s+/g, "_")}`;
+        }
       }
+    } catch {
+      // continue
+    }
+    return null;
+  }
+
+  // Dispatch in batches of 6, then return the first non-null in original order.
+  const BATCH = 6;
+  for (let i = 0; i < pairs.length; i += BATCH) {
+    const batch = pairs.slice(i, i + BATCH);
+    const results = await Promise.allSettled(batch.map(({ hub, t }) => probePair(hub, t)));
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value) return r.value;
     }
   }
 
@@ -314,36 +311,40 @@ async function verifyWikiHasSeriesContent(
 
   try {
     // 1. Does a page named after the series (or a synonym) exist here?
-    for (const t of titleForms) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-        const pageParams = new URLSearchParams({
-          action: "query",
-          titles: t,
-          redirects: "1",
-          format: "json",
-        });
-        const pageRes = await fetch(`${apiUrl(subdomain)}?${pageParams}`, {
-          headers,
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        if (!pageRes.ok) continue;
+    //    MediaWiki accepts up to 50 pipe-separated titles per request, so all
+    //    title forms can be checked in ONE round trip instead of N sequential
+    //    ones (a 3s timeout each was the largest remaining serial cost).
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const pageParams = new URLSearchParams({
+        action: "query",
+        titles: titleForms.join("|"),
+        redirects: "1",
+        format: "json",
+      });
+      const pageRes = await fetch(`${apiUrl(subdomain)}?${pageParams}`, {
+        headers,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (pageRes.ok) {
         const pageJson = await pageRes.json();
         const pageObj = pageJson?.query?.pages || {};
         const pageExists = Object.values(pageObj).some((p) => !isMissingPage(p));
         if (pageExists) return true;
-      } catch {
-        // Try the next title form.
       }
+    } catch {
+      // Fall through to search.
     }
 
     // 2. Fall back to a search for the series title inside the wiki. The hit
     //    title must contain the *whole* series title (or a synonym) — a hit
-    //    that merely shares one word is a coincidence, not coverage.
-    for (const t of titleForms.slice(0, 2)) {
-      try {
+    //    that merely shares one word is a coincidence, not coverage. Run the
+    //    two candidate searches concurrently.
+    const searchForms = titleForms.slice(0, 2);
+    const searchResults = await Promise.allSettled(
+      searchForms.map(async (t) => {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000);
         const searchParams = new URLSearchParams({
@@ -358,16 +359,12 @@ async function verifyWikiHasSeriesContent(
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
-        if (!searchRes.ok) continue;
+        if (!searchRes.ok) return false;
         const searchJson = await searchRes.json();
         const hits: Array<{ title?: string }> = searchJson?.query?.search || [];
         const targetNorm = normalize(t);
-        // A full containment match is always reliable. For a looser partial
-        // match, only the *distinctive* tokens count and ALL of them must
-        // appear — otherwise a page sharing one common word ("Thor'zarck" for
-        // "The Color of the End", "Battle" for "Phantom Blood") would pass.
         const distinctiveTokens = titleTokens(t).filter(isDistinctiveAnchor);
-        const meaningfulHit = hits.some((h) => {
+        return hits.some((h) => {
           const titleNorm = normalize(h?.title || "");
           if (titleNorm.includes(targetNorm)) return true;
           if (distinctiveTokens.length === 0) return false;
@@ -376,10 +373,10 @@ async function verifyWikiHasSeriesContent(
             hitTokens.some((ht) => tokensMatch(ht, tok)),
           );
         });
-        if (meaningfulHit) return true;
-      } catch {
-        // Try the next title form.
-      }
+      })
+    );
+    for (const r of searchResults) {
+      if (r.status === "fulfilled" && r.value) return true;
     }
   } catch {
     // If verification fails, assume not relevant.
@@ -783,8 +780,10 @@ export async function discoverWikiViaUnifiedSearch(
 
   const byWiki = new Map<string, AggregatedWiki>();
 
-  for (const query of queries) {
-    const hits = await fandomUnifiedSearch(query);
+  // Fire all unified-search queries concurrently; merging dedupes by wiki, so
+  // running them serially only added latency with no ordering benefit.
+  const allHits = await Promise.all(queries.map((q) => fandomUnifiedSearch(q)));
+  for (const hits of allHits) {
     for (const hit of hits) {
       if (!hit.subdomain) continue;
 
@@ -1434,20 +1433,25 @@ export async function resolveFandomWikiSubdomain(
     return discovered;
   }
 
-  // 2. Hub wiki fallback (e.g. koreanwebtoons.fandom.com)
-  const hubResult = await findWikiFromHub(seriesTitle, synonyms);
-  if (hubResult && minAnilistCharacters < 10) {
-    wikiSubdomainCache.set(cacheKey, hubResult);
-    persistWikiCache(wikiSubdomainCache);
-    return hubResult;
-  }
+  // Hub fallbacks carry only a handful of characters and are only useful as a
+  // supplement when AniList itself has a thin cast. Skip the (expensive, up to
+  // ~25 network calls) hub probing entirely when the result would be discarded.
+  if (minAnilistCharacters < 10) {
+    // 2. Hub wiki fallback (e.g. koreanwebtoons.fandom.com)
+    const hubResult = await findWikiFromHub(seriesTitle, synonyms);
+    if (hubResult) {
+      wikiSubdomainCache.set(cacheKey, hubResult);
+      persistWikiCache(wikiSubdomainCache);
+      return hubResult;
+    }
 
-  // 3. Multi-series hub wiki fallback (e.g. webtoon#PIGPEN, vsbattles#God_of_Blackfield)
-  const hubProbe = await probeHubWikis(seriesTitle, synonyms);
-  if (hubProbe && minAnilistCharacters < 10) {
-    wikiSubdomainCache.set(cacheKey, hubProbe);
-    persistWikiCache(wikiSubdomainCache);
-    return hubProbe;
+    // 3. Multi-series hub wiki fallback (e.g. webtoon#PIGPEN, vsbattles#God_of_Blackfield)
+    const hubProbe = await probeHubWikis(seriesTitle, synonyms);
+    if (hubProbe) {
+      wikiSubdomainCache.set(cacheKey, hubProbe);
+      persistWikiCache(wikiSubdomainCache);
+      return hubProbe;
+    }
   }
 
   wikiSubdomainCache.set(cacheKey, null);
@@ -1473,24 +1477,24 @@ export async function fetchCharacterImage(
 
   const candidateNames = Array.from(new Set([name, ...aliases].filter(Boolean)));
 
-  // 1. Direct pageimages query with redirects=1
-  for (const cand of candidateNames) {
-    try {
-      const params = new URLSearchParams({
-        action: "query",
-        titles: cand,
-        redirects: "1",
-        prop: "pageimages",
-        piprop: "original|thumbnail",
-        pithumbsize: "600",
-        format: "json",
-      });
+  // 1. Direct pageimages query for ALL candidate names in ONE request.
+  //    MediaWiki accepts pipe-separated titles, so a single round trip replaces
+  //    up to 4 sequential fetches (one per name/alias).
+  try {
+    const params = new URLSearchParams({
+      action: "query",
+      titles: candidateNames.join("|"),
+      redirects: "1",
+      prop: "pageimages",
+      piprop: "original|thumbnail",
+      pithumbsize: "600",
+      format: "json",
+    });
 
-      const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
-        headers: { "User-Agent": "SpoilerFreeMap/1.0" },
-      });
-      if (!res.ok) continue;
-
+    const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
+      headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+    });
+    if (res.ok) {
       const json = await res.json();
       const pages = json.query?.pages || {};
       for (const pageId of Object.keys(pages)) {
@@ -1502,37 +1506,50 @@ export async function fetchCharacterImage(
           return src;
         }
       }
-    } catch {
-      // ignore & try next
     }
+  } catch {
+    // Fall through to search.
   }
 
   // 2. OpenSearch search for page title then query pageimages (only on dedicated wikis to avoid cross-series pollution on hubs)
   if (!pageTitle) {
-    for (const cand of candidateNames.slice(0, 3)) {
+    const searchCandidates = candidateNames.slice(0, 3);
+    // Fetch search results for all candidates concurrently.
+    const searchResults = await Promise.allSettled(
+      searchCandidates.map((cand) => searchPages(subdomain, cand, 3).then((titles) => ({ cand, titles })))
+    );
+
+    // Collect all qualifying page titles across candidates, in candidate order.
+    const pageTitlesToQuery: string[] = [];
+    for (const r of searchResults) {
+      if (r.status !== "fulfilled") continue;
+      const { cand, titles } = r.value;
+      const normCand = cand.toLowerCase().replace(/[^a-z0-9]/g, "");
+      for (const title of titles) {
+        if (title.includes("/") || title.includes(":")) continue; // avoid subpages or category pages
+        const normTitle = title.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (!normTitle.includes(normCand) && !normCand.includes(normTitle)) continue;
+        pageTitlesToQuery.push(title);
+      }
+    }
+
+    // Batch all qualifying titles into a single pageimages query.
+    if (pageTitlesToQuery.length > 0) {
       try {
-        const titles = await searchPages(subdomain, cand, 3);
-        const normCand = cand.toLowerCase().replace(/[^a-z0-9]/g, "");
-        for (const title of titles) {
-          if (title.includes("/") || title.includes(":")) continue; // avoid subpages or category pages
-          const normTitle = title.toLowerCase().replace(/[^a-z0-9]/g, "");
-          if (!normTitle.includes(normCand) && !normCand.includes(normTitle)) continue;
+        const params = new URLSearchParams({
+          action: "query",
+          titles: pageTitlesToQuery.join("|"),
+          redirects: "1",
+          prop: "pageimages",
+          piprop: "original|thumbnail",
+          pithumbsize: "600",
+          format: "json",
+        });
 
-          const params = new URLSearchParams({
-            action: "query",
-            titles: title,
-            redirects: "1",
-            prop: "pageimages",
-            piprop: "original|thumbnail",
-            pithumbsize: "600",
-            format: "json",
-          });
-
-          const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
-            headers: { "User-Agent": "SpoilerFreeMap/1.0" },
-          });
-          if (!res.ok) continue;
-
+        const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
+          headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+        });
+        if (res.ok) {
           const json = await res.json();
           const pages = json.query?.pages || {};
           for (const pageId of Object.keys(pages)) {
@@ -2023,15 +2040,23 @@ async function fetchHubWikiCharacters(
     }
   } catch {}
 
-  // Resolve images for extracted characters
-  for (const c of results) {
-    if (c.imageUrl && c.imageUrl.startsWith("File:")) {
-      const direct = await resolveWikiFileUrl(subdomain, c.imageUrl);
-      if (direct) c.imageUrl = direct;
-    } else if (!c.imageUrl) {
-      const img = await fetchCharacterImage(`${subdomain}#${pageTitle}`, c.name);
-      if (img) c.imageUrl = img;
-    }
+  // Resolve images for extracted characters in parallel (bounded batches).
+  // Each resolveWikiFileUrl / fetchCharacterImage is a network round trip;
+  // awaiting them serially multiplies cost by the roster size (~35).
+  const IMG_CONCURRENCY = 6;
+  for (let i = 0; i < results.length; i += IMG_CONCURRENCY) {
+    const batch = results.slice(i, i + IMG_CONCURRENCY);
+    await Promise.allSettled(
+      batch.map(async (c) => {
+        if (c.imageUrl && c.imageUrl.startsWith("File:")) {
+          const direct = await resolveWikiFileUrl(subdomain, c.imageUrl);
+          if (direct) c.imageUrl = direct;
+        } else if (!c.imageUrl) {
+          const img = await fetchCharacterImage(`${subdomain}#${pageTitle}`, c.name);
+          if (img) c.imageUrl = img;
+        }
+      })
+    );
   }
 
   return results.slice(0, maxResults);

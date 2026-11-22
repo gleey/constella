@@ -149,33 +149,39 @@ async function findWikipediaCharacterPageUncached(
     candidates.push(t);
   }
 
-  for (const candidate of candidates) {
-    const json = (await fetchJson(
-      `${WIKIPEDIA_API}?${new URLSearchParams({
-        action: "query",
-        titles: candidate,
-        redirects: "1",
-        format: "json",
-        formatversion: "2",
-      })}`,
-    )) as { query?: { pages?: Array<{ title?: string; missing?: unknown; ns?: number }> } } | null;
+  // MediaWiki accepts up to 50 pipe-separated titles per query — batch all
+  // candidate titles into ONE existence check instead of ~9 sequential ones.
+  const json = (await fetchJson(
+    `${WIKIPEDIA_API}?${new URLSearchParams({
+      action: "query",
+      titles: candidates.join("|"),
+      redirects: "1",
+      format: "json",
+      formatversion: "2",
+    })}`,
+  )) as { query?: { pages?: Array<{ title?: string; missing?: unknown; ns?: number }> } } | null;
 
-    const page = json?.query?.pages?.[0];
-    if (!page || page.missing !== undefined || page.ns !== 0 || !page.title) continue;
+  const pages = json?.query?.pages ?? [];
+  // Evaluate pages in candidate order so the strongest form ("List of X
+  // characters") is preferred over a bare series article.
+  const orderedPages = candidates
+    .map((c) => pages.find((p) => p.title?.toLowerCase() === c.toLowerCase() && p.missing === undefined && p.ns === 0))
+    .filter((p): p is NonNullable<typeof p> => Boolean(p?.title));
 
+  for (const page of orderedPages) {
     // The article title must plausibly be about this series. This rejects
     // lookalikes such as "Cyanide & Happiness" for "Happiness" or "King Shark"
     // for "Shark".
-    const titleForMatch = page.title.replace(/^list of /i, "").replace(/ characters$/i, "");
+    const titleForMatch = page.title!.replace(/^list of /i, "").replace(/ characters$/i, "");
     const matchesSeries = titleForms.some((form) => isStrongTitleMatch(form, titleForMatch));
     if (!matchesSeries) continue;
 
     // Only accept "List of ..." pages directly; for the bare series article we
     // still need a Characters section, which is checked below.
-    const wikitext = await fetchWikipediaWikitext(page.title);
+    const wikitext = await fetchWikipediaWikitext(page.title!);
     if (!wikitext) continue;
 
-    const isListArticle = /^list of /i.test(page.title);
+    const isListArticle = /^list of /i.test(page.title!);
     const hasCharactersSection = /^={2,4}\s*(?:Main |Major |Recurring |Supporting )?characters\s*={2,4}/im.test(
       wikitext,
     );
@@ -185,8 +191,8 @@ async function findWikipediaCharacterPageUncached(
     if (extractWikipediaCharacterNames(wikitext).length < 3) continue;
 
     return {
-      pageTitle: page.title,
-      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`,
+      pageTitle: page.title!,
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title!.replace(/ /g, "_"))}`,
       wikitext,
     };
   }
@@ -541,13 +547,20 @@ async function findKitsuMediaUncached(
     return s === "manga" || s === "manhwa" || s === "manhua" || s === "oneshot";
   };
 
-  for (const form of titleForms.slice(0, 3)) {
-    const json = (await fetchJson(
-      `${KITSU_API}/manga?filter[text]=${encodeURIComponent(form)}&page[limit]=5`,
-      8000,
-      KITSU_HEADERS,
-    )) as { data?: Array<{ id: string; attributes: KitsuMediaAttributes }> } | null;
+  // Query the top title forms concurrently, then evaluate entries in form order
+  // so the primary title keeps priority over romaji/synonym matches.
+  const formsToQuery = titleForms.slice(0, 3);
+  const responses = await Promise.all(
+    formsToQuery.map((form) =>
+      fetchJson(
+        `${KITSU_API}/manga?filter[text]=${encodeURIComponent(form)}&page[limit]=5`,
+        8000,
+        KITSU_HEADERS,
+      ) as Promise<{ data?: Array<{ id: string; attributes: KitsuMediaAttributes }> } | null>
+    )
+  );
 
+  for (const json of responses) {
     for (const entry of json?.data ?? []) {
       const canonical = entry.attributes?.canonicalTitle || "";
       // Match against the primary title OR any known synonym (romaji title),

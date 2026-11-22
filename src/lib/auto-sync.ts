@@ -184,20 +184,33 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
         where: { mediaId: media.id },
       });
 
-      // 4. Upsert characters and resolve live portraits
-      for (const cand of characterCandidates) {
+      // 4. Resolve live portraits in parallel BEFORE the DB upsert loop so the
+      // per-character network calls overlap instead of serializing per create.
+      const resolvedImages: (string | null)[] = new Array(characterCandidates.length).fill(null);
+      if (wikiSubdomain) {
+        const IMG_CONCURRENCY = 6;
+        for (let i = 0; i < characterCandidates.length; i += IMG_CONCURRENCY) {
+          const batch = characterCandidates.slice(i, i + IMG_CONCURRENCY);
+          const results = await Promise.allSettled(
+            batch.map((cand) =>
+              isBrokenImageUrl(cand.imageUrl)
+                ? fetchCharacterImage(wikiSubdomain, cand.name, cand.aliases)
+                : Promise.resolve(null)
+            )
+          );
+          results.forEach((r, j) => {
+            if (r.status === "fulfilled" && r.value) resolvedImages[i + j] = r.value;
+          });
+        }
+      }
+
+      for (let idx = 0; idx < characterCandidates.length; idx++) {
+        const cand = characterCandidates[idx];
         let finalImage = cand.imageUrl;
 
-        // If character image is missing or broken, query live Fandom pageimages API
-        if (isBrokenImageUrl(finalImage) && wikiSubdomain) {
-          try {
-            const fandomImg = await fetchCharacterImage(wikiSubdomain, cand.name, cand.aliases);
-            if (fandomImg) {
-              finalImage = fandomImg;
-            }
-          } catch {
-            // non-fatal
-          }
+        // If character image is missing or broken, use the live Fandom image
+        if (isBrokenImageUrl(finalImage) && wikiSubdomain && resolvedImages[idx]) {
+          finalImage = resolvedImages[idx]!;
         }
 
         const matchedId = resolveCharacterName(cand.name, existingCharacters);

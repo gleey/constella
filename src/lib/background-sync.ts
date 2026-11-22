@@ -319,17 +319,34 @@ async function runCatalogSync(targetAnilistId?: number) {
         select: { id: true, name: true, aliases: true, imageUrl: true, introducedAtChapter: true },
       });
 
-      for (const c of charactersToSync) {
+      // Resolve broken/missing portraits in parallel BEFORE the DB loop so the
+      // per-character network calls overlap instead of serializing on each
+      // create/update. Concurrency-bounded to be a good API citizen.
+      const resolvedImages: (string | null)[] = new Array(charactersToSync.length).fill(null);
+      if (wikiSubdomain) {
+        const IMG_CONCURRENCY = 6;
+        for (let i = 0; i < charactersToSync.length; i += IMG_CONCURRENCY) {
+          const batch = charactersToSync.slice(i, i + IMG_CONCURRENCY);
+          const results = await Promise.allSettled(
+            batch.map((c, j) =>
+              isBrokenImageUrl(c.imageUrl)
+                ? fetchCharacterImage(wikiSubdomain, c.name, c.aliases)
+                : Promise.resolve(null)
+            )
+          );
+          results.forEach((r, j) => {
+            if (r.status === "fulfilled" && r.value) resolvedImages[i + j] = r.value;
+          });
+        }
+      }
+
+      for (let idx = 0; idx < charactersToSync.length; idx++) {
+        const c = charactersToSync[idx];
         let finalImage = c.imageUrl;
 
         // Fetch Fandom image if AniList image broken/missing (cached)
-        if (isBrokenImageUrl(finalImage) && wikiSubdomain) {
-          try {
-            const fandomImg = await fetchCharacterImage(wikiSubdomain, c.name, c.aliases);
-            if (fandomImg) finalImage = fandomImg;
-          } catch {
-            // non-fatal
-          }
+        if (isBrokenImageUrl(finalImage) && wikiSubdomain && resolvedImages[idx]) {
+          finalImage = resolvedImages[idx]!;
         }
 
         const estimatedIntro = charIntroMap.get(c.name) || 1;
@@ -397,6 +414,21 @@ async function runCatalogSync(targetAnilistId?: number) {
         const allChars = await prisma.character.findMany({ where: { mediaId: media.id } });
         const charByName = new Map(allChars.map((ch) => [ch.name, ch]));
 
+        // Load ALL existing relationships for this media once, then reason in
+        // memory. This replaces ~70 findFirst + ~140 create + ~70 update round
+        // trips per series with 2 bulk reads + a couple of createMany calls.
+        const existingRels = await prisma.relationship.findMany({ where: { mediaId: media.id } });
+        // Unordered pair key independent of direction, plus relationType for the
+        // main-character heuristic which is type-specific.
+        const relKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+        const existingByType = new Set(existingRels.map((r) => `${relKey(r.sourceCharacterId, r.targetCharacterId)}|${r.relationType}`));
+        const existingAnyType = new Set(existingRels.map((r) => relKey(r.sourceCharacterId, r.targetCharacterId)));
+
+        const toCreate: Array<{
+          mediaId: string; sourceCharacterId: string; targetCharacterId: string;
+          relationType: string; validFrom: number; validUntil: null; isSensitive: boolean;
+        }> = [];
+
         // Find protagonist (first MAIN character)
         const protagonist = mainChars[0]?.name;
         if (protagonist && charByName.has(protagonist)) {
@@ -413,54 +445,23 @@ async function runCatalogSync(targetAnilistId?: number) {
             const validFrom = Math.max(charIntroMap.get(protagonist) || 1, charIntroMap.get(otherName) || 1);
 
             if (protoId === otherId) continue; // never link a character to itself
-            // Unordered + same-type check: skips if EITHER direction already has this relation.
-            const exists = await prisma.relationship.findFirst({
-              where: {
-                mediaId: media.id,
-                relationType,
-                OR: [
-                  { sourceCharacterId: protoId, targetCharacterId: otherId },
-                  { sourceCharacterId: otherId, targetCharacterId: protoId },
-                ],
-              },
-            });
+            if (existingByType.has(`${relKey(protoId, otherId)}|${relationType}`)) continue;
 
-            if (!exists) {
-              await prisma.relationship.create({
-                data: {
-                  mediaId: media.id,
-                  sourceCharacterId: protoId,
-                  targetCharacterId: otherId,
-                  relationType,
-                  validFrom,
-                  validUntil: null,
-                  isSensitive: false,
-                },
-              });
-              // Also create reverse relationship
-              await prisma.relationship.create({
-                data: {
-                  mediaId: media.id,
-                  sourceCharacterId: otherId,
-                  targetCharacterId: protoId,
-                  relationType,
-                  validFrom,
-                  validUntil: null,
-                  isSensitive: false,
-                },
-              });
-            }
+            // Forward + reverse
+            toCreate.push(
+              { mediaId: media.id, sourceCharacterId: protoId, targetCharacterId: otherId, relationType, validFrom, validUntil: null, isSensitive: false },
+              { mediaId: media.id, sourceCharacterId: otherId, targetCharacterId: protoId, relationType, validFrom, validUntil: null, isSensitive: false },
+            );
+            existingByType.add(`${relKey(protoId, otherId)}|${relationType}`);
+            existingAnyType.add(relKey(protoId, otherId));
           }
         }
-      }
 
-      // Chain edges: link characters consecutive by debut chapter so EVERY
-      // character has >= 1 relationship — including non-MC to non-MC pairs.
-      // Edge appears exactly when the later of the two debuts
-      // (validFrom = max of both intros), so chapter progression always
-      // grows both nodes and connecting lines.
-      {
-        const allChars = await prisma.character.findMany({ where: { mediaId: media.id } });
+        // Chain edges: link characters consecutive by debut chapter so EVERY
+        // character has >= 1 relationship — including non-MC to non-MC pairs.
+        // Edge appears exactly when the later of the two debuts
+        // (validFrom = max of both intros), so chapter progression always
+        // grows both nodes and connecting lines.
         const sorted = [...allChars].sort(
           (a, b) => a.introducedAtChapter - b.introducedAtChapter || a.name.localeCompare(b.name),
         );
@@ -468,47 +469,38 @@ async function runCatalogSync(targetAnilistId?: number) {
           const prev = sorted[i - 1];
           const cur = sorted[i];
           if (prev.id === cur.id) continue; // safety: never self-link
-          const exists = await prisma.relationship.findFirst({
-            where: {
-              mediaId: media.id,
-              OR: [
-                { sourceCharacterId: prev.id, targetCharacterId: cur.id },
-                { sourceCharacterId: cur.id, targetCharacterId: prev.id },
-              ],
-            },
-          });
-          if (!exists) {
-            const vf = Math.max(prev.introducedAtChapter, cur.introducedAtChapter);
-            for (const [s, t] of [[prev.id, cur.id], [cur.id, prev.id]] as const) {
-              await prisma.relationship.create({
-                data: {
-                  mediaId: media.id,
-                  sourceCharacterId: s,
-                  targetCharacterId: t,
-                  relationType: "Ally",
-                  validFrom: vf,
-                  validUntil: null,
-                  isSensitive: false,
-                },
-              });
-            }
-          }
+          if (existingAnyType.has(relKey(prev.id, cur.id))) continue;
+          const vf = Math.max(prev.introducedAtChapter, cur.introducedAtChapter);
+          toCreate.push(
+            { mediaId: media.id, sourceCharacterId: prev.id, targetCharacterId: cur.id, relationType: "Ally", validFrom: vf, validUntil: null, isSensitive: false },
+            { mediaId: media.id, sourceCharacterId: cur.id, targetCharacterId: prev.id, relationType: "Ally", validFrom: vf, validUntil: null, isSensitive: false },
+          );
+          existingAnyType.add(relKey(prev.id, cur.id));
+        }
+
+        if (toCreate.length > 0) {
+          await prisma.relationship.createMany({ data: toCreate });
         }
 
         // Align validFrom: no edge may start before both endpoints debuted.
-        const rels = await prisma.relationship.findMany({ where: { mediaId: media.id } });
+        // Merge in the just-created rows (they are already aligned by
+        // construction) then batch updates by distinct target validFrom.
+        const allRels = [...existingRels, ...toCreate.map((c, i) => ({ id: `new-${i}`, ...c }))];
         const introOf = new Map(allChars.map((c) => [c.id, c.introducedAtChapter]));
-        for (const r of rels) {
+        const updatesByValidFrom = new Map<number, string[]>();
+        for (const r of allRels) {
           const need = Math.max(introOf.get(r.sourceCharacterId) ?? 1, introOf.get(r.targetCharacterId) ?? 1);
-          if (r.validFrom < need) {
-            await prisma.relationship.update({
-              where: { id: r.id },
-              data: {
-                validFrom: need,
-                validUntil: r.validUntil !== null && r.validUntil <= need ? null : undefined,
-              },
-            });
+          if (r.validFrom < need && !r.id.startsWith("new-")) {
+            const arr = updatesByValidFrom.get(need) ?? [];
+            arr.push(r.id);
+            updatesByValidFrom.set(need, arr);
           }
+        }
+        for (const [need, ids] of updatesByValidFrom) {
+          await prisma.relationship.updateMany({
+            where: { id: { in: ids } },
+            data: { validFrom: need },
+          });
         }
       }
 
