@@ -6,6 +6,8 @@
 const FANDOM_API_PATH = "/api.php";
 
 import { cacheGet, cacheSet } from "./api-cache";
+import fs from "node:fs";
+import path from "node:path";
 
 const FANDOM_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 hours
 
@@ -34,8 +36,42 @@ function apiUrl(wikiSubdomain: string): string {
   return `https://${subdomain}.fandom.com${FANDOM_API_PATH}`;
 }
 
+/** Path to persistent wiki subdomain cache file. */
+const WIKI_CACHE_FILE = path.resolve(process.cwd(), ".wiki-subdomain-cache.json");
+
+/** Load persistent cache from disk into memory map. */
+function loadPersistentWikiCache(): Map<string, string | null> {
+  const map = new Map<string, string | null>();
+  try {
+    const raw = fs.readFileSync(WIKI_CACHE_FILE, "utf8");
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object") {
+      for (const [k, v] of Object.entries(obj)) {
+        map.set(k, v === null ? null : String(v));
+      }
+    }
+  } catch {
+    // File doesn't exist or invalid — start fresh.
+  }
+  return map;
+}
+
+/** Persist memory cache to disk (async, fire-and-forget). */
+function persistWikiCache(map: Map<string, string | null>): void {
+  try {
+    const obj: Record<string, string | null> = {};
+    for (const [k, v] of map) {
+      obj[k] = v;
+    }
+    fs.writeFileSync(WIKI_CACHE_FILE, JSON.stringify(obj, null, 2));
+  } catch (e) {
+    console.warn("[wiki-cache] Failed to persist:", e);
+  }
+}
+
 // Cache discovered Fandom subdomains to avoid repeated network checks
-const wikiSubdomainCache = new Map<string, string | null>();
+// Populated from persistent file at module load.
+const wikiSubdomainCache = loadPersistentWikiCache();
 
 // Curated mappings for unconventional fandom subdomains that cannot be deduced from standard rules
 const KNOWN_WIKI_SUBDOMAINS: Record<string, string> = {
@@ -1246,27 +1282,23 @@ export async function resolveFandomWikiSubdomain(
   // Last-word candidates are tried after everything else (they're low-priority fallbacks)
   const uniqueCandidates = [...longCandidates, ...shortAcronyms, ...lastWordCandidates];
 
-  let bestCand: string | null = null;
-  let maxArticles = -1;
-  let bestVerified = false;
-
   // Probing dozens of guessed subdomains is the slow path. Give it a hard time
   // budget so a full-catalog sweep cannot stall on unresolvable series.
   const probeDeadline = Date.now() + 20_000;
 
-  for (const cand of uniqueCandidates) {
+  /** Probe a single candidate subdomain. Returns {cand, articles, isVerified, sitename, mainpage} or null. */
+  async function probeCandidate(cand: string): Promise<{
+    cand: string;
+    articles: number;
+    isVerified: boolean;
+    isSingleWordFallback: boolean;
+  } | null> {
+    if (Date.now() > probeDeadline) return null;
+    const isSingleWordFallback = singleWordCandidates.has(cand);
+    // If we already found a decent match, skip short acronyms (likely false positives)
+    // Note: this check is done outside since bestCand/maxArticles are shared state.
+    // We'll filter before dispatching to keep it simple.
     try {
-      // Stop probing once the budget is exhausted; whatever we have wins.
-      if (Date.now() > probeDeadline) break;
-
-      // Single-word candidates (last-word fallbacks) must pass strict verification:
-      // the sitename/mainpage must contain the EXACT word or the series title,
-      // and the wiki must not be a mega-franchise that happens to share a word.
-      const isSingleWordFallback = singleWordCandidates.has(cand);
-
-      // If we already found a decent match, skip short acronyms (likely false positives)
-      if (cand.length <= 3 && bestCand && maxArticles >= 10) continue;
-
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3500);
       const res = await fetch(`https://${cand}.fandom.com/api.php?action=query&meta=siteinfo&siprop=general|statistics&format=json`, {
@@ -1275,107 +1307,120 @@ export async function resolveFandomWikiSubdomain(
       });
       clearTimeout(timeoutId);
 
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.query?.general?.sitename) {
-          const sitename: string = json.query.general.sitename || "";
-          const articles = json?.query?.statistics?.articles || 0;
-          // Skip tiny unrelated wikis for short acronym candidates
-          if (cand.length <= 3 && articles < 15) continue;
+      if (!res.ok) return null;
+      const json = await res.json();
+      if (!json?.query?.general?.sitename) return null;
 
-          // Relevance check: verify the wiki sitename or mainpage relates to the series title.
-          // Matching is done on whole WORDS, not substrings — a naive `.includes()` lets an
-          // acronym like "teou" match "The Epics of Uuruk" (t-e-o-u substring) and lets a
-          // common word like "blood" match any "Blood Wiki".
-          const mainpage: string = json.query.general.mainpage || "";
-          const siteNorm = normalizeTitleForMatch(sitename.replace(/\bwiki\b|\bwikia\b/gi, ""));
-          const mainNorm = normalizeTitleForMatch(mainpage.replace(/\bwiki\b|\bwikia\b/gi, ""));
-          const nameWords = new Set([...siteNorm.split(" "), ...mainNorm.split(" ")].filter(Boolean));
+      const sitename: string = json.query.general.sitename || "";
+      const mainpage: string = json.query.general.mainpage || "";
+      const articles = json?.query?.statistics?.articles || 0;
 
-          const wordsMatch = (token: string) =>
-            [...nameWords].some((w) => tokensMatch(w, token));
+      // Skip tiny unrelated wikis for short acronym candidates
+      if (cand.length <= 3 && articles < 15) return null;
 
-          // A bare acronym ("gos", "teou") is relevant only when the wiki's name initials
-          // spell it out AND the wiki is named after this work, not merely containing the
-          // letters in order. "gOS Wiki" → "gos" qualifies; "The Epics of Uuruk" → "teou" does
-          // not, because the leading "The"/"of" are just connective words in a longer title.
-          const initials = [...nameWords].map((w) => w[0]).join("");
-          const acronymRelevant =
-            initials === cand ||
-            // Tolerate a leading "the" in the wiki name: "The GOS Wiki".
-            initials === `the${cand}`;
+      // Relevance check
+      const siteNorm = normalizeTitleForMatch(sitename.replace(/\bwiki\b|\bwikia\b/gi, ""));
+      const mainNorm = normalizeTitleForMatch(mainpage.replace(/\bwiki\b|\bwikia\b/gi, ""));
+      const nameWords = new Set([...siteNorm.split(" "), ...mainNorm.split(" ")].filter(Boolean));
 
-          const titleWordTokens = toSlug(seriesTitle)
-            .split("-")
-            .filter((t) => t.length > 2 && !MATCH_STOPWORDS.has(t));
-          const candWordTokens = cand.split("-").filter((t) => t.length > 2);
+      const wordsMatch = (token: string) =>
+        [...nameWords].some((w) => tokensMatch(w, token));
 
-          const isRelevant =
-            acronymRelevant ||
-            titleWordTokens.some(wordsMatch) ||
-            candWordTokens.some(wordsMatch) ||
-            siteNorm === normalizeTitleForMatch(seriesTitle);
+      const initials = [...nameWords].map((w) => w[0]).join("");
+      const acronymRelevant =
+        initials === cand ||
+        initials === `the${cand}`;
 
-          // For short acronyms (<= 4 chars), require strict relevance
-          if (cand.length <= 4 && !isRelevant) continue;
+      const titleWordTokens = toSlug(seriesTitle)
+        .split("-")
+        .filter((t) => t.length > 2 && !MATCH_STOPWORDS.has(t));
+      const candWordTokens = cand.split("-").filter((t) => t.length > 2);
 
-          // For single-word fallbacks (e.g. "punpun", "pokemon"), require that the sitename
-          // is specifically about this series — not a mega-franchise that shares a word.
-          if (isSingleWordFallback) {
-            const slugTitle = toSlug(seriesTitle);
-            const exactWordMatch = siteNorm === cand.toLowerCase() ||
-              siteNorm === `${cand.toLowerCase()} wiki` ||
-              siteNorm.replace(/\s+/g, "-").includes(slugTitle) ||
-              mainNorm.replace(/\s+/g, "-").includes(slugTitle);
-            // If the exact title isn't in the sitename, only accept small single-word wikis
-            // (< 1000 articles) where the sitename actually contains the word.
-            // This prevents mega-franchises like "pokemon" (38k articles) or "friends" (1.6k)
-            // while allowing genuine small wikis like "punpun" (143 articles).
-            const isSmallDistinctiveWiki = articles < 1000 &&
-              ([...nameWords].some((w) => tokensMatch(w, cand.toLowerCase())));
-            if (!exactWordMatch && !isSmallDistinctiveWiki) continue;
+      const isRelevant =
+        acronymRelevant ||
+        titleWordTokens.some(wordsMatch) ||
+        candWordTokens.some(wordsMatch) ||
+        siteNorm === normalizeTitleForMatch(seriesTitle);
 
-            // A single-word/acronym candidate with almost no articles is a dead wiki, not a
-            // usable source — "mari" (a 2-page empty wiki) would otherwise pass only because
-            // its name matches. Real single-word wikis ("punpun" 143, "tbate" 1k+) have content.
-            if (articles < 10) continue;
-          }
+      // For short acronyms (<= 4 chars), require strict relevance
+      if (cand.length <= 4 && !isRelevant) return null;
 
-          // For longer candidates that pass relevance, also do content-based verification
-          const isVerified = isRelevant
-            ? await verifyWikiHasSeriesContent(cand, seriesTitle, synonyms)
-            : articles > 500; // big wikis get benefit of the doubt if relevant
+      // For single-word fallbacks (e.g. "punpun", "pokemon"), strict sitename check
+      if (isSingleWordFallback) {
+        const slugTitle = toSlug(seriesTitle);
+        const exactWordMatch = siteNorm === cand.toLowerCase() ||
+          siteNorm === `${cand.toLowerCase()} wiki` ||
+          siteNorm.replace(/\s+/g, "-").includes(slugTitle) ||
+          mainNorm.replace(/\s+/g, "-").includes(slugTitle);
+        const isSmallDistinctiveWiki = articles < 1000 &&
+          ([...nameWords].some((w) => tokensMatch(w, cand.toLowerCase())));
+        if (!exactWordMatch && !isSmallDistinctiveWiki) return null;
+        if (articles < 10) return null;
+      }
 
-          // Single-word fallbacks additionally require content verification to pass
-          if (isSingleWordFallback && !isVerified) continue;
+      // Content-based verification for relevant longer candidates
+      const isVerified = isRelevant
+        ? await verifyWikiHasSeriesContent(cand, seriesTitle, synonyms)
+        : articles > 500;
 
-          // Prefer verified results over unverified ones
-          if (isVerified && !bestVerified) {
-            bestCand = cand;
-            maxArticles = articles;
-            bestVerified = true;
-            continue;
-          }
+      // Single-word fallbacks additionally require content verification
+      if (isSingleWordFallback && !isVerified) return null;
 
-          // If we already have a verified result, only replace with another verified one that's bigger
-          if (bestVerified && !isVerified) continue;
+      return { cand, articles, isVerified, isSingleWordFallback };
+    } catch {
+      return null;
+    }
+  }
 
-          if (articles > maxArticles) {
-            maxArticles = articles;
-            bestCand = cand;
-            if (articles > 500 && isVerified) {
-              break;
-            }
-          }
+  // Run probes in parallel with concurrency limit (6 concurrent requests)
+  const CONCURRENCY = 6;
+  let bestCand: string | null = null;
+  let maxArticles = -1;
+  let bestVerified = false;
+
+  // Process candidates in batches
+  for (let i = 0; i < uniqueCandidates.length; i += CONCURRENCY) {
+    if (Date.now() > probeDeadline) break;
+
+    // Skip short acronyms if we already have a decent verified match
+    const batch = uniqueCandidates
+      .slice(i, i + CONCURRENCY)
+      .filter((cand) => !(cand.length <= 3 && bestCand && maxArticles >= 10));
+
+    if (batch.length === 0) continue;
+
+    const results = await Promise.allSettled(batch.map(probeCandidate));
+
+    for (const result of results) {
+      if (result.status !== "fulfilled" || !result.value) continue;
+      const { cand, articles, isVerified } = result.value;
+
+      // Prefer verified results over unverified ones
+      if (isVerified && !bestVerified) {
+        bestCand = cand;
+        maxArticles = articles;
+        bestVerified = true;
+        continue;
+      }
+
+      // If we already have a verified result, only replace with another verified one that's bigger
+      if (bestVerified && !isVerified) continue;
+
+      if (articles > maxArticles) {
+        maxArticles = articles;
+        bestCand = cand;
+        if (articles > 500 && isVerified) {
+          break;
         }
       }
-    } catch {
-      // Continue to next candidate
     }
+
+    if (bestVerified && maxArticles > 500) break;
   }
 
   if (bestCand) {
     wikiSubdomainCache.set(cacheKey, bestCand);
+    persistWikiCache(wikiSubdomainCache);
     return bestCand;
   }
 
@@ -1385,6 +1430,7 @@ export async function resolveFandomWikiSubdomain(
   // tiny hub list. (The hub is still better than nothing for a bare roster.)
   if (discovered && minAnilistCharacters < 10) {
     wikiSubdomainCache.set(cacheKey, discovered);
+    persistWikiCache(wikiSubdomainCache);
     return discovered;
   }
 
@@ -1392,6 +1438,7 @@ export async function resolveFandomWikiSubdomain(
   const hubResult = await findWikiFromHub(seriesTitle, synonyms);
   if (hubResult && minAnilistCharacters < 10) {
     wikiSubdomainCache.set(cacheKey, hubResult);
+    persistWikiCache(wikiSubdomainCache);
     return hubResult;
   }
 
@@ -1399,10 +1446,12 @@ export async function resolveFandomWikiSubdomain(
   const hubProbe = await probeHubWikis(seriesTitle, synonyms);
   if (hubProbe && minAnilistCharacters < 10) {
     wikiSubdomainCache.set(cacheKey, hubProbe);
+    persistWikiCache(wikiSubdomainCache);
     return hubProbe;
   }
 
   wikiSubdomainCache.set(cacheKey, null);
+  persistWikiCache(wikiSubdomainCache);
   return null;
 }
 

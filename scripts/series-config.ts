@@ -161,28 +161,81 @@ export async function buildSeriesConfigs(targetAnilistId?: number | null): Promi
   console.log(`[WIKI] Fetching AniList synonyms for ${idsNeedingSynonyms.length} media without overrides...`);
   const synonymsMap = await fetchAniListSynonyms(idsNeedingSynonyms);
 
-  const configs: SeriesMapping[] = [];
+  // Separate media into those with overrides (instant) and those needing resolution (network)
+  const overrideConfigs: SeriesMapping[] = [];
+  const toResolve: Array<{ media: typeof medias[0]; synonyms: string[] }> = [];
+
   for (const media of medias) {
     const override = FANDOM_WIKI_OVERRIDES[media.anilistId];
-    let fandomWiki = override?.fandomWiki ?? "";
     const synonyms = synonymsMap.get(media.anilistId) || [];
-    if (!fandomWiki) {
-      console.log(`[WIKI] Me-resolve subdomain Fandom untuk "${media.title}" (${synonyms.length} sinonim)...`);
-      fandomWiki = (await resolveFandomWikiSubdomain(media.title, synonyms)) || "";
+    if (override?.fandomWiki) {
+      overrideConfigs.push({
+        mediaId: media.id,
+        anilistId: media.anilistId,
+        title: media.title,
+        fandomWiki: override.fandomWiki,
+        mainCharacters: override.mainCharacters ?? [],
+        synonyms,
+      });
+    } else {
+      toResolve.push({ media, synonyms });
     }
-    if (!fandomWiki) {
-      console.warn(`[WIKI-WARN] Subdomain Fandom tidak ditemukan untuk "${media.title}". Cast Fandom dilewati.`);
-    }
-    configs.push({
-      mediaId: media.id,
-      anilistId: media.anilistId,
-      title: media.title,
-      fandomWiki,
-      mainCharacters: override?.mainCharacters ?? [],
-      synonyms,
-    });
   }
-  return configs;
+
+  // Resolve wiki subdomains in parallel with a concurrency cap to avoid hammering Fandom.
+  // This replaces the old sequential loop (~8s per series → ~6s per 10 series).
+  const RESOLVE_CONCURRENCY = 8;
+  const resolvedConfigs: SeriesMapping[] = [];
+
+  console.log(`[WIKI] Resolving ${toResolve.length} Fandom subdomains (concurrency: ${RESOLVE_CONCURRENCY})...`);
+  for (let i = 0; i < toResolve.length; i += RESOLVE_CONCURRENCY) {
+    const batch = toResolve.slice(i, i + RESOLVE_CONCURRENCY);
+    console.log(`[WIKI] Batch ${Math.floor(i / RESOLVE_CONCURRENCY) + 1}/${Math.ceil(toResolve.length / RESOLVE_CONCURRENCY)} (${batch.length} series)...`);
+
+    const batchResults = await Promise.allSettled(
+      batch.map(async ({ media, synonyms }) => {
+        try {
+          const fandomWiki = (await resolveFandomWikiSubdomain(media.title, synonyms)) || "";
+          return {
+            mediaId: media.id,
+            anilistId: media.anilistId,
+            title: media.title,
+            fandomWiki,
+            mainCharacters: [],
+            synonyms,
+          };
+        } catch (err) {
+          console.warn(`[WIKI-WARN] Resolve failed for "${media.title}": ${err instanceof Error ? err.message : String(err)}`);
+          return {
+            mediaId: media.id,
+            anilistId: media.anilistId,
+            title: media.title,
+            fandomWiki: "",
+            mainCharacters: [],
+            synonyms,
+          };
+        }
+      })
+    );
+
+    for (const result of batchResults) {
+      if (result.status === "fulfilled") {
+        resolvedConfigs.push(result.value);
+      }
+    }
+
+    // Brief pause between batches to be a good API citizen
+    if (i + RESOLVE_CONCURRENCY < toResolve.length) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+
+  // Merge and preserve original catalog order
+  const allConfigs = [...overrideConfigs, ...resolvedConfigs];
+  const byAnilistId = new Map(allConfigs.map((c) => [c.anilistId, c]));
+  return medias
+    .map((m) => byAnilistId.get(m.anilistId))
+    .filter((c): c is SeriesMapping => !!c);
 }
 
 /** Deterministic faction palette (distinct on dark bg #0b0f19). */
