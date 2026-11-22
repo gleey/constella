@@ -385,37 +385,43 @@ async function runTests() {
     fail("ch50: Cha Hae-In present, Goto absent", err);
   }
 
-  // Ch 100: Goto Ryuji status = Alive (validFrom 55, validUntil 110 exclusive — active at 100)
+  // Goto Ryuji: Alive → Deceased exclusive boundary.
+  // Chapter numbers are derived from the DB instead of hardcoded: the seed
+  // uses ch55–110, but live enrichment may rewrite them (current DB: ch91–101).
+  // The invariant under test is the exclusive-upper-bound semantics, not the
+  // specific chapter number.
   try {
-    const g100 = await buildGraph(media.id, 100);
-    const gotoNode = g100.nodes.find(n => n.name === "Goto Ryuji");
-    assert(gotoNode, "Goto Ryuji should appear at ch100");
-    assert.equal(gotoNode.status?.status, "Alive", "Goto should be Alive at ch100");
-    pass("ch100: Goto Ryuji = Alive");
-  } catch (err) {
-    fail("ch100: Goto Ryuji = Alive", err);
-  }
+    const gotoChar = await prisma.character.findFirst({
+      where: { mediaId: media.id, name: "Goto Ryuji" },
+      select: { id: true },
+    });
+    if (!gotoChar) throw new Error("Goto Ryuji not found in DB");
+    const statuses = await prisma.characterStatus.findMany({
+      where: { characterId: gotoChar.id },
+      select: { status: true, validFrom: true, validUntil: true },
+      orderBy: { validFrom: "asc" },
+    });
+    const alive = statuses.find((s) => s.status === "Alive");
+    const deceased = statuses.find((s) => s.status === "Deceased");
+    if (!alive || !deceased) throw new Error("Goto Ryuji must have both Alive and Deceased status rows");
+    if (alive.validUntil === null) throw new Error("Goto Ryuji Alive row must have an exclusive validUntil");
+    const boundary = alive.validUntil;
+    assert.equal(
+      deceased.validFrom,
+      boundary,
+      `Deceased validFrom (${deceased.validFrom}) must equal Alive validUntil (${boundary})`,
+    );
 
-  // Ch 110: Goto Ryuji status = Deceased (validFrom 110, validUntil null — 110 is exclusive end of Alive)
-  try {
-    const g110 = await buildGraph(media.id, 110);
-    const gotoNode = g110.nodes.find(n => n.name === "Goto Ryuji");
-    assert(gotoNode, "Goto Ryuji should appear at ch110");
-    assert.equal(gotoNode.status?.status, "Deceased", "Goto should be Deceased at ch110");
-    pass("ch110: Goto Ryuji = Deceased");
+    const gBefore = await buildGraph(media.id, boundary - 1);
+    const gAt = await buildGraph(media.id, boundary);
+    const beforeNode = gBefore.nodes.find((n) => n.name === "Goto Ryuji");
+    const atNode = gAt.nodes.find((n) => n.name === "Goto Ryuji");
+    assert(beforeNode && atNode, "Goto Ryuji should appear on both sides of the boundary");
+    assert.equal(beforeNode.status?.status, "Alive", `Goto should be Alive at ch${boundary - 1}`);
+    assert.equal(atNode.status?.status, "Deceased", `Goto should be Deceased at ch${boundary}`);
+    pass(`ch${boundary - 1}/${boundary}: Goto Ryuji = Alive → Deceased (exclusive boundary)`);
   } catch (err) {
-    fail("ch110: Goto Ryuji = Deceased", err);
-  }
-
-  // Ch 109: Goto Ryuji status = Alive (109 < 110 exclusive boundary)
-  try {
-    const g109 = await buildGraph(media.id, 109);
-    const gotoNode = g109.nodes.find(n => n.name === "Goto Ryuji");
-    assert(gotoNode, "Goto Ryuji should appear at ch109");
-    assert.equal(gotoNode.status?.status, "Alive", "Goto should be Alive at ch109");
-    pass("ch109: Goto Ryuji = Alive (exclusive boundary)");
-  } catch (err) {
-    fail("ch109: Goto Ryuji = Alive (exclusive boundary)", err);
+    fail("Goto Ryuji = Alive → Deceased (exclusive boundary)", err);
   }
 
   // Ch 80: Jinwoo↔Cha relationship = Ally (Stranger ch40-80 exclusive, Ally ch80-null)
