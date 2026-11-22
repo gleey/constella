@@ -115,7 +115,87 @@ export default async function AboutPage() {
                 .
               </p>
             </div>
+
+            {/* Wikipedia Credit */}
+            <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-white">Wikipedia</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                  CC-BY-SA 4.0
+                </span>
+              </div>
+              <p className="text-slate-300 leading-relaxed">
+                Sumber cadangan karakter: artikel{" "}
+                <span className="font-medium">&quot;List of ... characters&quot;</span>{" "}
+                dan bagian karakter pada artikel seri, dipakai ketika wiki Fandom tidak memadai, di bawah lisensi{" "}
+                <a
+                  href="https://creativecommons.org/licenses/by-sa/4.0/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sky-400 hover:text-sky-300 underline underline-offset-2 font-medium"
+                >
+                  Creative Commons Attribution-ShareAlike (CC-BY-SA 4.0)
+                </a>
+                .
+              </p>
+            </div>
+
+            {/* Kitsu Credit */}
+            <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-white">Kitsu API</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-300 border border-violet-500/30">
+                  Roster &amp; Status
+                </span>
+              </div>
+              <p className="text-slate-300 leading-relaxed">
+                Sumber cadangan daftar karakter per media, nama alternatif, potret karakter, dan bio singkat, serta status rilis dan verifikasi identitas seri via mapping{" "}
+                <span className="font-mono text-[11px]">anilist/manga</span> —{" "}
+                <a
+                  href="https://kitsu.io"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-violet-400 hover:text-violet-300 underline underline-offset-2 font-medium"
+                >
+                  Kitsu
+                </a>
+                .
+              </p>
+            </div>
+
+            {/* MangaUpdates Credit */}
+            <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-white">MangaUpdates API</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                  Chapter Count
+                </span>
+              </div>
+              <p className="text-slate-300 leading-relaxed">
+                Jumlah bab terkini untuk seri yang masih{" "}
+                <span className="italic">ongoing</span>, ketika AniList tidak menyediakan angka (AniList melaporkan{" "}
+                <span className="font-mono text-[11px]">chapters: null</span> untuk seri yang belum tamat) —{" "}
+                <a
+                  href="https://www.mangaupdates.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-amber-400 hover:text-amber-300 underline underline-offset-2 font-medium"
+                >
+                  MangaUpdates
+                </a>
+                .
+              </p>
+            </div>
           </div>
+
+          <p className="text-xs leading-relaxed text-slate-400">
+            <span className="font-semibold text-slate-200">Urutan sumber karakter:</span>{" "}
+            wiki Fandom (dedicated) → section hub Fandom → artikel karakter Wikipedia → bio Kitsu → sintesis AI murni. Teks dari sumber mana pun melewati tahap ekstraksi AI yang sama, sehingga batas bab temporal tetap ditegakkan identik.
+          </p>
+          <p className="text-xs leading-relaxed text-slate-400">
+            <span className="font-semibold text-slate-200">Urutan jumlah bab:</span>{" "}
+            AniList → MangaUpdates → nilai tersimpan → <span className="italic">floor</span> 100 (hanya bila semua sumber gagal).
+          </p>
         </div>
 
         <div className="mt-10 rounded-2xl bg-white/[0.03] ring-1 ring-white/10 p-5 sm:p-6">
