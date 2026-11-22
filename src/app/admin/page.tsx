@@ -154,17 +154,30 @@ export default function AdminPage() {
     if (existing) {
       setAdminToken(existing);
       setIsTokenSet(true);
-      document.cookie = `admin_token=${encodeURIComponent(existing)}; path=/; max-age=2592000; SameSite=Lax`;
+      // Cookie is already set server-side as httpOnly; nothing to write here.
     } else {
       setIsTokenSet(false);
     }
   }, []);
 
-  const handleSaveAdminToken = (token: string) => {
-    setAdminToken(token);
-    document.cookie = `admin_token=${encodeURIComponent(token)}; path=/; max-age=2592000; SameSite=Lax`;
-    localStorage.setItem("admin_token", token);
-    setIsTokenSet(Boolean(token.trim()));
+  const handleSaveAdminToken = async (token: string) => {
+    const clean = token.trim();
+    if (!clean) return;
+    // Exchange the raw secret for a signed httpOnly cookie; never persist the
+    // secret in a readable cookie or localStorage.
+    const res = await fetch("/api/admin/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: clean }),
+    });
+    if (!res.ok) {
+      setIsTokenSet(false);
+      setShowTokenInput(true);
+      return;
+    }
+    setAdminToken("");
+    localStorage.removeItem("admin_token");
+    setIsTokenSet(true);
     setShowTokenInput(false);
     checkBgStatus();
   };
