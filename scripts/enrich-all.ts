@@ -133,7 +133,12 @@ REQUIREMENTS:
 /**
  * Enrich a single media series.
  */
-async function enrichMedia(config: SeriesMapping) {
+export interface EnrichOptions {
+  /** Limit used when a series has no curated mainCharacters override. */
+  limit?: string;
+}
+
+export async function enrichMedia(config: SeriesMapping, options: EnrichOptions = {}) {
   console.log(`\n======================================================`);
   console.log(`[ENRICH] Memulai seri: ${config.title} (AniList: ${config.anilistId})`);
   console.log(`======================================================`);
@@ -228,7 +233,7 @@ async function enrichMedia(config: SeriesMapping) {
   // menimpa hasil sebelumnya, jadi lore yang salah tidak pernah menetap.
   let priorityNames = config.mainCharacters;
   if (priorityNames.length === 0) {
-    const limitArg = process.argv.find((a) => a.startsWith("--limit="));
+    const limitArg = options.limit ?? process.argv.find((a) => a.startsWith("--limit="));
     const autoLimit = limitArg ? Math.max(1, parseInt(limitArg.split("=")[1], 10) || 15) : 15;
     priorityNames = dbCharacters.slice(0, autoLimit).map((c) => c.name);
     console.log(`[AUTO] Seri "${media.title}" tanpa override → auto-pilih ${priorityNames.length} karakter untuk pengayaan.`);
