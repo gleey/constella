@@ -93,6 +93,7 @@ constella/
 │   ├── backfill-live-chapters.ts # Backfill jumlah bab live (MangaUpdates) untuk seri releasing
 │   ├── backfill-live-statuses.ts # Backfill status rilis live (Kitsu)
 │   ├── backfill-ratings-and-status.ts # Backfill rating & status rilis dari AniList
+│   ├── run-global-lore-sync.ts # Orkestrator lore sync global: ingest cast (no AI) → enrich-all (AI)
 │   ├── audit-wiki-resolution.ts   # Audit resolusi wiki seluruh katalog (--min-chars=N)
 │   ├── fix-factions.ts      # Perbaikan relasi faksi karakter
 │   ├── remove-duplicates.ts # Pembersihan duplikat nama karakter
@@ -257,12 +258,13 @@ Proyek ini menyediakan serangkaian skrip CLI untuk manajemen data katalog dan ek
 | `npm run sync:repair` | Memperbaiki dan memperbarui URL foto karakter live | `-` |
 | `npx tsx -r dotenv/config scripts/seed-popular.ts` | **Tier 1:** Bulk ingest katalog judul populer dari AniList (tanpa AI) | `--pages=2`<br>`--perPage=20`<br>`--limit=40`<br>`--dry-run` |
 | `npx tsx -r dotenv/config scripts/enrich-fandom.ts` | **Tier 2:** Ekstraksi dinamis kategori Fandom ke tabel review | `--title="Solo Leveling"`<br>`--limit=30`<br>`--dry-run` |
-| `npx tsx -r dotenv/config scripts/enrich-all.ts` | **Tier 3:** Batch lore enrichment komprehensif langsung ke DB | `--mediaId=<uuid>`<br>`--series=<slug>` |
+| `npx tsx -r dotenv/config scripts/enrich-all.ts` | **Tier 3:** Batch lore enrichment komprehensif langsung ke DB | `--mediaId=<uuid>`<br>`--series=<slug>`<br>`--limit=20` |
 | `npx tsx -r dotenv/config scripts/ingest-fandom-cast.ts` | Ingest roster karakter dari wiki Fandom ke tabel review | `mediaId=<anilistId>`<br>`--limit=100`<br>`--dry-run` |
 | `npx tsx -r dotenv/config scripts/backfill-live-chapters.ts` | Backfill jumlah bab live (MangaUpdates) untuk seri yang masih *releasing* | `-` |
 | `npx tsx -r dotenv/config scripts/backfill-live-statuses.ts` | Backfix status rilis media via AniList (authoritative by `anilistId`) | `-` |
 | `npx tsx -r dotenv/config scripts/backfill-ratings-and-status.ts` | Backfill rating konten & status rilis seluruh media via AniList | `-` |
 | `npx tsx -r dotenv/config scripts/audit-wiki-resolution.ts` | Audit resolusi wiki seluruh katalog (deteksi seri tanpa karakter) | `--min-chars=5` |
+| `npm run sync:lore:global` | Lore sync global seluruh katalog: cast ingest (no AI) → `enrich-all --limit=20` (AI, memakan token) | `-` |
 
 > Semua skrip yang menyentuh database atau API eksternal wajib dijalankan lewat `npx tsx -r dotenv/config scripts/<nama>.ts` agar variabel dari `.env` termuat.
 
