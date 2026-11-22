@@ -168,13 +168,16 @@ export async function probeHubWikis(
           //    is NOT a character name from a different franchise.
           //    This prevents "orange" → "ORANGE_MARMALADE" and "Shark" → "Shark" false positives.
           const isExact = normM === normTarget;
-          const isVerseMatch = /\bverse\b/.test(parenContent) && normM.replace(parenContent, "").includes(normTarget);
+          const isVerseMatch = /\bverse\b/.test(parenContent) &&
+            normM.includes(normTarget) &&
+            !parenContent;
 
           // For long titles (>= 10 chars), allow fuzzy match only if target is fully contained
           // in the match AND the match doesn't look like a character from another franchise
           const isLongMatch =
             normTarget.length >= 10 &&
             normM.includes(normTarget) &&
+            !parenContent && // no parenthetical suffix for fuzzy matches
             // Reject if match is much longer than target (likely a different series)
             normM.length <= normTarget.length + 15;
 
