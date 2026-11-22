@@ -7,6 +7,7 @@
 
 import { prisma } from "../src/lib/prisma";
 import { resolveFandomWikiSubdomain } from "../src/lib/fandom";
+import { mediaTitleForms } from "../src/lib/anilist";
 
 export interface SeriesMapping {
   mediaId: string;
@@ -14,6 +15,8 @@ export interface SeriesMapping {
   title: string;
   fandomWiki: string;
   mainCharacters: string[]; // hint prioritas pengayaan LLM (kosong = pilih otomatis)
+  /** AniList alternate/romaji titles — used by fallback sources. */
+  synonyms: string[];
 }
 
 /** Hint manual: anilistId → { fandomWiki, mainCharacters }. */
@@ -121,11 +124,17 @@ async function fetchAniListSynonyms(ids: number[]): Promise<Map<number, string[]
       });
       const json = await res.json();
       for (const m of json?.data?.Page?.media || []) {
-        const titles: string[] = [];
-        if (m.title?.romaji) titles.push(m.title.romaji);
-        if (m.title?.english) titles.push(m.title.english);
-        if (m.synonyms) titles.push(...m.synonyms);
-        map.set(m.id, titles);
+        // mediaTitleForms() de-duplicates and keeps english/romaji ahead of the
+        // looser synonyms, so the strongest identity signals are tried first.
+        map.set(
+          m.id,
+          mediaTitleForms({
+            title: m.title?.english || m.title?.romaji || "",
+            englishTitle: m.title?.english,
+            romajiTitle: m.title?.romaji,
+            synonyms: m.synonyms,
+          }),
+        );
       }
     } catch (err) {
       console.warn(`[WIKI] Gagal fetch AniList synonyms batch ${i}: ${err instanceof Error ? err.message : String(err)}`);
@@ -156,8 +165,8 @@ export async function buildSeriesConfigs(targetAnilistId?: number | null): Promi
   for (const media of medias) {
     const override = FANDOM_WIKI_OVERRIDES[media.anilistId];
     let fandomWiki = override?.fandomWiki ?? "";
+    const synonyms = synonymsMap.get(media.anilistId) || [];
     if (!fandomWiki) {
-      const synonyms = synonymsMap.get(media.anilistId) || [];
       console.log(`[WIKI] Me-resolve subdomain Fandom untuk "${media.title}" (${synonyms.length} sinonim)...`);
       fandomWiki = (await resolveFandomWikiSubdomain(media.title, synonyms)) || "";
     }
@@ -170,6 +179,7 @@ export async function buildSeriesConfigs(targetAnilistId?: number | null): Promi
       title: media.title,
       fandomWiki,
       mainCharacters: override?.mainCharacters ?? [],
+      synonyms,
     });
   }
   return configs;

@@ -91,6 +91,36 @@ export interface MediaDetail extends SearchResult {
   characters: CharacterDetail[];
 }
 
+/**
+ * All the titles a series is known by, most-specific-first, for matching against
+ * third-party sources.
+ *
+ * Fandom wikis are frequently named after the *romaji* title ("Akatsuki no Yona
+ * Wiki", "Yagate Kimi ni Naru Wiki") while AniList's `synonyms` array often holds
+ * only translations and abbreviations. Passing the romaji title alongside the
+ * synonyms is what lets those wikis be recognised; omitting it is why titles like
+ * "Yona of the Dawn" and "Bloom Into You" were unresolvable.
+ */
+export function mediaTitleForms(media: {
+  title: string;
+  romajiTitle?: string | null;
+  englishTitle?: string | null;
+  synonyms?: string[] | null;
+}): string[] {
+  const forms = [media.title, media.englishTitle, media.romajiTitle, ...(media.synonyms || [])];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const form of forms) {
+    const trimmed = (form || "").trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
+
 const SEARCH_QUERY = `
 query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {

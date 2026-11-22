@@ -6,7 +6,7 @@
  */
 
 import { prisma } from "../src/lib/prisma";
-import { fetchMediaDetail, searchMedia } from "../src/lib/anilist";
+import { fetchMediaDetail, mediaTitleForms, searchMedia } from "../src/lib/anilist";
 import { resolveFandomWikiSubdomain, fetchCharacterImage } from "../src/lib/fandom";
 import { isBrokenImageUrl } from "../src/lib/auto-sync";
 import { resolveCharacterName } from "../src/lib/name-resolution";
@@ -77,7 +77,7 @@ async function main() {
     }
 
     // 3. Dynamically resolve Fandom Wiki
-    const synonyms = detail?.synonyms || [];
+    const synonyms = detail ? mediaTitleForms(detail) : [];
     const wikiSubdomain = await resolveFandomWikiSubdomain(m.title, synonyms);
     if (wikiSubdomain) {
       console.log(`  ✓ Connected Fandom Wiki: ${wikiSubdomain}`);

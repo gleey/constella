@@ -232,6 +232,28 @@ export async function resolveWikiFileUrl(
  * Checks whether the wiki has a Category:Characters page or a page matching the series title.
  * This prevents false positives where a wiki subdomain exists but is about an unrelated topic.
  */
+/**
+ * MediaWiki signals a non-existent page with `missing: ""` — an EMPTY STRING,
+ * which is falsy. Naive checks like `!page.missing` therefore treat every
+ * missing page as existing. This helper tests for the *presence* of the key.
+ */
+function isMissingPage(page: unknown): page is undefined {
+  if (!page || typeof page !== "object") return true;
+  const p = page as { missing?: unknown; invalid?: unknown };
+  // `missing` / `invalid` may be "" (empty string), true, or absent entirely.
+  if ("missing" in p && p.missing !== undefined) return true;
+  if ("invalid" in p && p.invalid !== undefined) return true;
+  return false;
+}
+
+/**
+ * Prove that a candidate wiki actually covers the requested series.
+ *
+ * `Category:Characters` alone is NOT sufficient — plenty of unrelated wikis have
+ * such a category. The wiki must additionally expose either a page named after
+ * the series (in any known title form) or a character category whose members
+ * include a series-title page.
+ */
 async function verifyWikiHasSeriesContent(
   subdomain: string,
   seriesTitle: string,
@@ -241,38 +263,17 @@ async function verifyWikiHasSeriesContent(
   const normTitle = normalize(seriesTitle);
   if (!normTitle) return false;
 
+  const headers = { "User-Agent": "SpoilerFreeMap/1.0" };
+  const titleForms = [seriesTitle, ...synonyms]
+    .filter((t): t is string => Boolean(t && t.trim()) && !isNonLatinTitle(t))
+    .slice(0, 4);
+
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-    // Check if Category:Characters exists on this wiki (strong indicator of a manga/manhwa wiki)
-    const params = new URLSearchParams({
-      action: "query",
-      titles: "Category:Characters",
-      format: "json",
-    });
-    const res = await fetch(`${apiUrl(subdomain)}?${params}`, {
-      headers: { "User-Agent": "SpoilerFreeMap/1.0" },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!res.ok) return false;
-    const json = await res.json();
-    const pages = json?.query?.pages || {};
-    const hasCategoryCharacters = Object.values(pages).some(
-      (p: unknown) => {
-        const page = p as { missing?: boolean; title?: string };
-        return !page.missing && page.title === "Category:Characters";
-      }
-    );
-
-    if (hasCategoryCharacters) return true;
-
-    // Also check if a page matching the series title exists
-    const titlesToCheck = [seriesTitle, ...synonyms].filter(Boolean).slice(0, 3);
-    for (const t of titlesToCheck) {
+    // 1. Does a page named after the series (or a synonym) exist here?
+    for (const t of titleForms) {
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
         const pageParams = new URLSearchParams({
           action: "query",
           titles: t,
@@ -280,27 +281,515 @@ async function verifyWikiHasSeriesContent(
           format: "json",
         });
         const pageRes = await fetch(`${apiUrl(subdomain)}?${pageParams}`, {
-          headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+          headers,
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         if (!pageRes.ok) continue;
         const pageJson = await pageRes.json();
         const pageObj = pageJson?.query?.pages || {};
-        const pageExists = Object.values(pageObj).some(
-          (p: unknown) => {
-            const page = p as { missing?: boolean };
-            return !page.missing;
-          }
-        );
+        const pageExists = Object.values(pageObj).some((p) => !isMissingPage(p));
         if (pageExists) return true;
       } catch {
-        // continue
+        // Try the next title form.
+      }
+    }
+
+    // 2. Fall back to a search for the series title inside the wiki. The hit
+    //    title must contain the *whole* series title (or a synonym) — a hit
+    //    that merely shares one word is a coincidence, not coverage.
+    for (const t of titleForms.slice(0, 2)) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const searchParams = new URLSearchParams({
+          action: "query",
+          list: "search",
+          srsearch: t,
+          srlimit: "5",
+          format: "json",
+        });
+        const searchRes = await fetch(`${apiUrl(subdomain)}?${searchParams}`, {
+          headers,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!searchRes.ok) continue;
+        const searchJson = await searchRes.json();
+        const hits: Array<{ title?: string }> = searchJson?.query?.search || [];
+        const targetNorm = normalize(t);
+        const meaningfulHit = hits.some((h) => {
+          const titleNorm = normalize(h?.title || "");
+          // The page title must contain the full requested title.
+          return titleNorm.includes(targetNorm);
+        });
+        if (meaningfulHit) return true;
+      } catch {
+        // Try the next title form.
       }
     }
   } catch {
-    // If verification fails, assume not relevant
+    // If verification fails, assume not relevant.
   }
 
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-wiki discovery via Fandom's official unified-search service.
+//
+// The legacy `www.fandom.com/api/v1/Search/CrossWiki` endpoint is behind
+// Cloudflare and returns a "Just a moment..." challenge to server-side callers.
+// `services.fandom.com/unified-search/page-search` is the endpoint the Fandom
+// site itself uses and answers plain JSON, so we can discover the *actual*
+// dedicated wiki for a series instead of brute-forcing subdomain guesses.
+// ---------------------------------------------------------------------------
+
+const FANDOM_UNIFIED_SEARCH = "https://services.fandom.com/unified-search/page-search";
+
+/**
+ * Markers that identify aggregator / meta wikis (dubbing databases, crossover
+ * fanon, versus-debate wikis, ...). These frequently rank high for a series
+ * query but are never that series' own character wiki.
+ */
+const GENERIC_WIKI_MARKERS = [
+  "dubbing", "doblaje", "voice over", "voice-over", "voiceover", "voice actors",
+  "fanon", "crossover", "shipping", "lost episode", "creepypasta", "tropedia",
+  "trope", "versus", "vs battles", "vsbattles", "character stats", "power listing",
+  "powerlisting", "heroes", "villains", "best tv shows", "animanga", "historica",
+  "civilization", "wikia database", "fictional", "headcanon", "saimoe", "respect thread",
+  "battle wiki", "comic vine", "wiki database", "encyclopedia", "everything",
+];
+
+/** Normalize a title for comparison: lowercase, ASCII, alphanumeric + spaces. */
+function normalizeTitleForMatch(raw: string): string {
+  return (raw || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const MATCH_STOPWORDS = new Set([
+  "the", "of", "a", "an", "and", "to", "in", "on", "is", "are", "my", "me",
+  "i", "at", "with", "for", "from", "wa", "no", "ni", "de", "mo",
+]);
+
+/** Meaningful tokens of a title (drops stopwords and very short fragments). */
+function titleTokens(raw: string): string[] {
+  return normalizeTitleForMatch(raw)
+    .split(" ")
+    .filter((t) => t.length > 2 && !MATCH_STOPWORDS.has(t));
+}
+
+function isNonLatinTitle(raw: string): boolean {
+  return /^[\p{Script=Han}\p{Script=Hangul}\p{Script=Katakana}\p{Script=Hiragana}\p{Script=Thai}]/u.test(raw || "");
+}
+
+function isGenericAggregatorWiki(sitename: string, subdomain: string): boolean {
+  const haystack = `${sitename} ${subdomain.replace(/-/g, " ")}`.toLowerCase();
+  return GENERIC_WIKI_MARKERS.some((marker) => haystack.includes(marker));
+}
+
+/**
+ * Words too generic to identify a series on their own. A wiki whose name only
+ * shares one of these with a title (e.g. "Memories Wiki" for "Memories of
+ * Emanon") is almost certainly unrelated.
+ */
+const GENERIC_ANCHOR_WORDS = new Set([
+  "memories", "memory", "inside", "outside", "happiness", "happy", "shark",
+  "passion", "love", "life", "world", "story", "stories", "tales", "chronicle",
+  "chronicles", "legend", "legends", "hero", "heroes", "villain", "villainess",
+  "school", "academy", "friends", "adventures", "adventure", "magic", "power",
+  "game", "games", "dream", "dreams", "night", "dark", "light", "blood", "death",
+  "king", "queen", "prince", "princess", "knight", "sword", "demon", "dragon",
+  "angel", "devil", "god", "gods", "monster", "ghost", "spirit", "star", "stars",
+  "moon", "sun", "sky", "fire", "water", "earth", "wind", "soul", "heart",
+  "time", "days", "day", "three", "one", "two", "first", "last", "new", "old",
+  "girl", "girls", "boy", "boys", "man", "men", "woman", "women", "wife",
+  "husband", "family", "home", "house", "room", "city", "town", "village",
+  "kingdom", "empire", "war", "peace", "revenge", "return", "rise", "fall",
+  "beginning", "end", "final", "secret", "silent", "voice", "song", "music",
+  "flower", "flowers", "garden", "forest", "sea", "ocean", "island", "mountain",
+  "company", "office", "work", "job", "money", "gold", "silver", "iron", "steel",
+  "level", "levels", "rank", "class", "skill", "skills", "system", "status",
+  "player", "players", "user", "users", "master", "lord", "lady", "sir",
+  "chapter", "volume", "series", "manga", "manhwa", "manhua", "anime", "novel",
+]);
+
+/**
+ * Is this word distinctive enough to identify a series by itself?
+ * Requires a reasonable length and rejects common English / genre vocabulary.
+ */
+function isDistinctiveAnchor(word: string): boolean {
+  if (word.length < 4) return false;
+  if (GENERIC_ANCHOR_WORDS.has(word)) return false;
+  return true;
+}
+
+interface FandomSearchHit {
+  subdomain: string;
+  sitename: string;
+  pageTitle: string;
+  hub: string;
+}
+
+/** One unified-search request, memoized for 12h. Never throws. */
+async function fandomUnifiedSearch(query: string, limit = 20): Promise<FandomSearchHit[]> {
+  const cacheKey = `fandom:usearch:${query.toLowerCase().trim()}`;
+  const cached = cacheGet<FandomSearchHit[]>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const params = new URLSearchParams({
+      query: query.trim(),
+      lang: "en",
+      namespace: "0",
+      limit: String(limit),
+    });
+    const res = await fetch(`${FANDOM_UNIFIED_SEARCH}?${params}`, {
+      headers: { "User-Agent": "SpoilerFreeMap/1.0" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) return [];
+
+    const json = await res.json();
+    const hits: FandomSearchHit[] = [];
+    const seen = new Set<string>();
+    for (const r of json?.results ?? []) {
+      try {
+        const subdomain = new URL(r.url).hostname.replace(/\.fandom\.com$/i, "");
+        if (!subdomain) continue;
+        const key = `${subdomain}::${r.title || ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        hits.push({
+          subdomain,
+          sitename: r.sitename || "",
+          pageTitle: r.title || "",
+          hub: r.hub || "",
+        });
+      } catch {
+        // Malformed URL — ignore this result.
+      }
+    }
+    cacheSet(cacheKey, hits, FANDOM_CACHE_TTL);
+    return hits;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Do two tokens refer to the same name? Exact match, or a shared prefix long
+ * enough to be meaningful ("komi" ↔ "komisan", "tomo" ↔ "tomochan").
+ */
+function tokensMatch(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length >= 4 && b.length >= 4) {
+    return a.startsWith(b) || b.startsWith(a);
+  }
+  return false;
+}
+
+/**
+ * Score how strongly a candidate wiki identity matches the series title.
+ * Returns `null` when the wiki cannot plausibly be the same work.
+ *
+ * Two independent signals are required, so that a wiki sharing one common word
+ * ("Memories Wiki", "Inside Wiki", "AlexWiki", "Hungry Shark Wiki") is rejected
+ * while genuine romaji wikis ("Komi-san wa Komyushou Desu Wiki", "Oyasumi
+ * Punpun Wiki", "Tomo-chan wa Onnanoko Wikia") are accepted:
+ *
+ *   1. At least one *distinctive* series token appears in the wiki identity.
+ *   2. The wiki name carries information beyond the matched title words — i.e.
+ *      it is not merely a bare subset of the title ("AlexWiki" for "BJ Alex").
+ */
+function scoreWikiIdentity(
+  seriesTitle: string,
+  seriesTokens: string[],
+  sitename: string,
+  subdomain: string,
+  synonymTokens: string[][] = [],
+): number | null {
+  const siteClean = normalizeTitleForMatch(sitename.replace(/\bwiki\b|\bwikia\b/gi, ""));
+  const hostClean = subdomain.replace(/-/g, " ");
+  const titleClean = normalizeTitleForMatch(seriesTitle);
+  if (!siteClean && !hostClean) return null;
+
+  const wikiTokens = `${siteClean} ${hostClean}`.split(" ").filter(Boolean);
+
+  // Signal 1: an exact full-title match is decisive.
+  if (siteClean === titleClean || hostClean === titleClean) return 120;
+
+  // Signal 2: an exact match against a known synonym (romaji title, alternate
+  // translation) is equally decisive — this is how "Komi Can't Communicate"
+  // finds the "Komi-san wa Komyushou Desu Wiki".
+  for (const synTokens of synonymTokens) {
+    if (synTokens.length === 0) continue;
+    const covered = synTokens.filter((t) => wikiTokens.some((w) => tokensMatch(w, t)));
+    if (covered.length === synTokens.length) return 115;
+  }
+
+  // Signal 3: single-word titles are the highest-risk case ("Shark" vs "Hungry
+  // Shark Wiki", "BJ Alex" vs the generic "AlexWiki"). Only an exact identity
+  // match is trustworthy here; anything else is a coincidence.
+  if (seriesTokens.length <= 1) return null;
+
+  // Signal 4: at least one distinctive series token must appear in the wiki name.
+  const matchedSeriesTokens = seriesTokens.filter((t) =>
+    wikiTokens.some((w) => tokensMatch(w, t)),
+  );
+  const distinctiveHits = matchedSeriesTokens.filter(isDistinctiveAnchor);
+  if (distinctiveHits.length === 0) return null;
+
+  const coverage = matchedSeriesTokens.length / seriesTokens.length;
+
+  // Signal 5: a long wiki name that only brushes one title word is unrelated
+  // ("The Yellow-Haired Villain ... Wants Happiness Wiki" for "Happiness").
+  if (coverage < 0.5 && distinctiveHits.length < 2) {
+    if (wikiTokens.length > seriesTokens.length + 4) return null;
+  }
+
+  let score = 0;
+  score += Math.round(coverage * 60);
+  score += distinctiveHits.length * 12;
+  if (coverage === 1 && seriesTokens.length >= 2) score += 20;
+
+  return score;
+}
+
+/**
+ * Discover a series' dedicated Fandom wiki through Fandom's own search index.
+ * Returns a plain subdomain ("solo-leveling") or a hub target ("webtoon#PIGPEN").
+ */
+export async function discoverWikiViaUnifiedSearch(
+  seriesTitle: string,
+  synonyms: string[] = [],
+): Promise<string | null> {
+  if (!seriesTitle || isNonLatinTitle(seriesTitle)) return null;
+
+  // De-duplicate the title list first. Callers routinely pass the series title
+  // again as one of the synonyms (english + romaji + synonyms all mixed), and a
+  // duplicate would otherwise consume one of the three query slots — that alone
+  // made "Komi Can't Communicate" fail even though its romaji form resolves it.
+  const seenForms = new Set<string>();
+  const titleForms: string[] = [];
+  for (const form of [seriesTitle, ...synonyms]) {
+    const trimmed = (form || "").trim();
+    if (!trimmed || isNonLatinTitle(trimmed)) continue;
+    const key = trimmed.toLowerCase();
+    if (seenForms.has(key)) continue;
+    seenForms.add(key);
+    titleForms.push(trimmed);
+  }
+
+  const queries = titleForms.slice(0, 3);
+  if (queries.length === 0) return null;
+
+  const seriesTokens = titleTokens(seriesTitle);
+  if (seriesTokens.length === 0) return null;
+
+  // Tokenized synonyms let the scorer recognise romaji / alternate titles
+  // (e.g. "Komi-san wa Komyushou Desu" for "Komi Can't Communicate"). The series
+  // title itself is excluded: it is already covered by the exact-match signals,
+  // and letting it in as a "synonym" would let a single-word title pass the
+  // single-word guard ("Shark" matching the "Hungry Shark Wiki").
+  const seriesKey = normalizeTitleForMatch(seriesTitle);
+  const synonymTokens = titleForms
+    .filter((form) => normalizeTitleForMatch(form) !== seriesKey)
+    .map((form) => titleTokens(form))
+    .filter((t) => t.length > 0);
+
+  // Every title form we can match a page name against.
+  const allTitleForms = titleForms;
+
+  const pageMatchesAnyTitle = (pageTitle: string): boolean => {
+    const pageNorm = normalizeTitleForMatch(pageTitle);
+    const pageTok = titleTokens(pageTitle).join(" ");
+    return allTitleForms.some(
+      (t) =>
+        normalizeTitleForMatch(t) === pageNorm ||
+        (pageTok.length > 0 && titleTokens(t).join(" ") === pageTok),
+    );
+  };
+
+  interface Aggregated {
+    subdomain: string;
+    sitename: string;
+    score: number;
+    exactPageTitles: string[];
+    hub: string;
+    hitCount: number;
+    /**
+     * True when the wiki's identity was established by a decisive signal (its
+     * name or subdomain equals the series title, or equals a known synonym).
+     * Those need no further proof. Weak fuzzy matches do.
+     */
+    decisive: boolean;
+  }
+
+  const byWiki = new Map<string, Aggregated>();
+
+  for (const query of queries) {
+    const hits = await fandomUnifiedSearch(query);
+    for (const hit of hits) {
+      if (!hit.subdomain) continue;
+
+      const pageIsExact = pageMatchesAnyTitle(hit.pageTitle);
+
+      const isHub = (HUB_WIKIS as readonly string[]).includes(hit.subdomain);
+
+      // Hub wikis (webtoon, vsbattles, ...) are shared by thousands of series, so
+      // their sitename never matches a series title. They are only usable when
+      // they carry a page named exactly like the series.
+      if (isHub) {
+        if (!pageIsExact) continue;
+        const existingHub = byWiki.get(hit.subdomain);
+        if (existingHub) {
+          existingHub.hitCount += 1;
+          if (!existingHub.exactPageTitles.includes(hit.pageTitle)) {
+            existingHub.exactPageTitles.push(hit.pageTitle);
+          }
+        } else {
+          byWiki.set(hit.subdomain, {
+            subdomain: hit.subdomain,
+            sitename: hit.sitename,
+            score: 70,
+            exactPageTitles: [hit.pageTitle],
+            hub: hit.hub,
+            hitCount: 1,
+            // A hub is only accepted when it carries a page named exactly like
+            // the series, which is decisive on its own.
+            decisive: true,
+          });
+        }
+        continue;
+      }
+
+      if (isGenericAggregatorWiki(hit.sitename, hit.subdomain)) continue;
+
+      const identityScore = scoreWikiIdentity(
+        seriesTitle,
+        seriesTokens,
+        hit.sitename,
+        hit.subdomain,
+        synonymTokens,
+      );
+
+      // NOTE: an exactly-matching page title is NOT sufficient evidence on its
+      // own. Multi-series wikis (animax, isekai, otome-isekai, mysingingmonsters)
+      // all host pages named after individual series, so accepting "page exists"
+      // as identity lets them through as if they were dedicated wikis. Romaji-
+      // named wikis ("Yagate Kimi ni Naru Wiki" for "Bloom Into You") are instead
+      // recovered by the synonym signal above, because callers pass AniList
+      // synonyms — that is the only trustworthy way to link the two names.
+      if (identityScore === null) continue;
+
+      // Scores >= 115 come only from the exact-name and exact-synonym signals.
+      const isDecisive = identityScore >= 115;
+
+      const existing = byWiki.get(hit.subdomain);
+      if (existing) {
+        existing.hitCount += 1;
+        existing.score = Math.max(existing.score, identityScore);
+        existing.decisive = existing.decisive || isDecisive;
+        if (pageIsExact && !existing.exactPageTitles.includes(hit.pageTitle)) {
+          existing.exactPageTitles.push(hit.pageTitle);
+        }
+      } else {
+        byWiki.set(hit.subdomain, {
+          subdomain: hit.subdomain,
+          sitename: hit.sitename,
+          score: identityScore,
+          exactPageTitles: pageIsExact ? [hit.pageTitle] : [],
+          hub: hit.hub,
+          hitCount: 1,
+          decisive: isDecisive,
+        });
+      }
+    }
+  }
+
+  const ranked = Array.from(byWiki.values())
+    .map((w) => ({
+      ...w,
+      // A wiki that has a page named exactly like the series is almost certainly it.
+      score: w.score + (w.exactPageTitles.length > 0 ? 30 : 0) + Math.min(w.hitCount, 5),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  // Minimum confidence before we accept a discovery. Weak candidates fall
+  // through to the legacy subdomain-probing path instead of being trusted.
+  const MIN_SCORE = 55;
+
+  for (const candidate of ranked.slice(0, 3)) {
+    if (candidate.score < MIN_SCORE) break;
+
+    // Hub wikis need a concrete page title to be useful.
+    if ((HUB_WIKIS as readonly string[]).includes(candidate.subdomain)) {
+      const pageTitle = candidate.exactPageTitles[0];
+      if (pageTitle) return `${candidate.subdomain}#${pageTitle.replace(/\s+/g, "_")}`;
+      continue;
+    }
+
+    // Validate the wiki actually exists and carries content.
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(
+        `https://${candidate.subdomain}.fandom.com/api.php?action=query&meta=siteinfo&siprop=general|statistics&format=json`,
+        { headers: { "User-Agent": "SpoilerFreeMap/1.0" }, signal: controller.signal },
+      );
+      clearTimeout(timeoutId);
+      if (!res.ok) continue;
+
+      const json = await res.json();
+      const sitename: string = json?.query?.general?.sitename || "";
+      const articles: number = json?.query?.statistics?.articles || 0;
+      if (!sitename) continue;
+      if (isGenericAggregatorWiki(sitename, candidate.subdomain)) continue;
+
+      // A wiki with no articles cannot supply characters.
+      if (articles < 5) continue;
+
+      // Identity was established by an exact name/synonym match, or by a hub
+      // page titled exactly like the series — no further proof needed.
+      //
+      // A fuzzy match (partial token overlap) is different: it must additionally
+      // prove it covers this series by exposing a page or category for it. This
+      // is what keeps multi-series wikis (animax, isekai, mysingingmonsters) out
+      // while allowing romaji-named dedicated wikis ("Komi-san wa Komyushou Desu
+      // Wiki" for "Komi Can't Communicate") through — their *name* is the
+      // synonym, but they never have a page titled with the English name.
+      if (!candidate.decisive) {
+        const siteNorm = normalizeTitleForMatch(sitename.replace(/\bwiki\b|\bwikia\b/gi, ""));
+        const isExactName =
+          siteNorm === normalizeTitleForMatch(seriesTitle) ||
+          candidate.subdomain.replace(/-/g, " ") === normalizeTitleForMatch(seriesTitle);
+
+        if (!isExactName) {
+          const verified = await verifyWikiHasSeriesContent(
+            candidate.subdomain,
+            seriesTitle,
+            synonyms,
+          );
+          if (!verified) continue;
+        }
+      }
+
+      return candidate.subdomain;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -333,6 +822,16 @@ export async function resolveFandomWikiSubdomain(
       wikiSubdomainCache.set(cacheKey, res);
       return res;
     }
+  }
+
+  // 2. Cross-wiki discovery via Fandom's own search index. This finds the real
+  //    dedicated wiki (e.g. "komisan", "bj-alex", "the-tutorial-is-too-hard")
+  //    instead of guessing subdomains, and is far cheaper than probing dozens
+  //    of candidates. Falls through to probing when nothing is confident.
+  const discovered = await discoverWikiViaUnifiedSearch(seriesTitle, synonyms);
+  if (discovered) {
+    wikiSubdomainCache.set(cacheKey, discovered);
+    return discovered;
   }
 
   const cleanTitle = (raw: string) =>
@@ -582,8 +1081,15 @@ export async function resolveFandomWikiSubdomain(
   let maxArticles = -1;
   let bestVerified = false;
 
+  // Probing dozens of guessed subdomains is the slow path. Give it a hard time
+  // budget so a full-catalog sweep cannot stall on unresolvable series.
+  const probeDeadline = Date.now() + 20_000;
+
   for (const cand of uniqueCandidates) {
     try {
+      // Stop probing once the budget is exhausted; whatever we have wins.
+      if (Date.now() > probeDeadline) break;
+
       // Single-word candidates (last-word fallbacks) must pass strict verification:
       // the sitename/mainpage must contain the EXACT word or the series title,
       // and the wiki must not be a mega-franchise that happens to share a word.
@@ -842,7 +1348,7 @@ export async function fetchWikitext(
     return null;
   }
   const page = json.query?.pages?.[0];
-  if (!page || page.missing) return null;
+  if (isMissingPage(page)) return null;
 
   const content = page.revisions?.[0]?.slots?.main?.content ?? null;
   if (!content) return null;

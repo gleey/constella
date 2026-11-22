@@ -13,6 +13,7 @@
 import { prisma } from "../src/lib/prisma";
 import { fetchMediaDetail } from "../src/lib/anilist";
 import { fetchCharacterWikitextSmart, cleanWikitextForLLM } from "../src/lib/fandom";
+import { fetchAltCharacterText, fetchAltCharacterRoster } from "../src/lib/alt-sources";
 import { parseCharacterWikitext, type GeminiParsedCharacter, getGeminiModels, normalizeGeminiOutput } from "../src/lib/gemini";
 import { resolveCharacterName, resolveFactionName } from "../src/lib/name-resolution";
 import { validateTemporalBounds } from "../src/lib/temporal";
@@ -183,9 +184,40 @@ async function enrichMedia(config: SeriesMapping) {
   }
 
   // Reload all characters in media
-  const dbCharacters = await prisma.character.findMany({
+  let dbCharacters = await prisma.character.findMany({
     where: { mediaId: media.id },
   });
+
+  // If AniList and Fandom both left this series empty, try the fallback
+  // sources so there is something to enrich at all.
+  if (dbCharacters.length === 0) {
+    try {
+      const altRoster = await fetchAltCharacterRoster(
+        media.title,
+        [],
+        media.type === "MANHWA" ? "MANHWA" : "MANGA",
+        40,
+      );
+      if (altRoster.length > 0) {
+        console.log(`[Sumber Alt] Menemukan ${altRoster.length} karakter untuk ${media.title}.`);
+        for (const rc of altRoster) {
+          await prisma.character.create({
+            data: {
+              mediaId: media.id,
+              name: rc.name,
+              aliases: rc.aliases,
+              imageUrl: rc.imageUrl || "",
+              introducedAtChapter: 1,
+            },
+          });
+        }
+        dbCharacters = await prisma.character.findMany({ where: { mediaId: media.id } });
+      }
+    } catch (err) {
+      console.warn(`[WARN] Gagal mengambil roster alternatif: ${(err as Error).message}`);
+    }
+  }
+
   console.log(`[DB] Total ${dbCharacters.length} karakter terdaftar di DB untuk ${media.title}.`);
 
   const allNamesList = dbCharacters.map((c) => c.name);
@@ -253,6 +285,32 @@ async function enrichMedia(config: SeriesMapping) {
       }
     } catch (err: any) {
       console.warn(`[WARN] Gagal mengambil/memproses Fandom wikitext untuk ${charName}: ${err.message}`);
+    }
+
+    // A2. Fallback sources (Wikipedia / Kitsu) when there is no Fandom wiki or
+    //     the wiki has no page for this character. The prose goes through the
+    //     exact same AI extractor, so chapter bounding is unchanged.
+    if (!parsed) {
+      try {
+        const alt = await fetchAltCharacterText(
+          media.title,
+          dbChar.name,
+          [],
+          media.type === "MANHWA" ? "MANHWA" : "MANGA",
+        );
+        if (alt && alt.text.length >= 200) {
+          const cleaned = cleanWikitextForLLM(alt.text, 12000);
+          console.log(`[Sumber Alt] ${alt.attribution} → ${cleaned.length} chars.`);
+          parsed = await parseCharacterWikitext(
+            cleaned,
+            dbChar.name,
+            media.chapterNumberingSource,
+            media.totalChapters,
+          );
+        }
+      } catch (err) {
+        console.warn(`[WARN] Sumber alternatif gagal untuk ${charName}: ${(err as Error).message}`);
+      }
     }
 
     // B. Fallback: Lore synthesis with Gemini if wikitext failed

@@ -5,9 +5,10 @@
  */
 
 import { prisma } from "./prisma";
-import { fetchPopularMedia, fetchMediaDetail, type CharacterDetail } from "./anilist";
+import { fetchPopularMedia, fetchMediaDetail, mediaTitleForms, type CharacterDetail } from "./anilist";
 import { resolveFandomWikiSubdomain, fetchCharacterImage, fetchFandomCategoryCharacters } from "./fandom";
 import { resolveCharacterName } from "./name-resolution";
+import { fetchAltCharacterRoster } from "./alt-sources";
 import { normalizeName, shouldMergeCharacters, canonicalizeName } from "./name-dedupe";
 import { fetchLiveMangaInfo } from "./live-chapters";
 
@@ -94,7 +95,10 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
       });
 
       // 2. Dynamically resolve Fandom Wiki for this series
-      const wikiSubdomain = await resolveFandomWikiSubdomain(detail.title, detail.synonyms);
+      const wikiSubdomain = await resolveFandomWikiSubdomain(
+        detail.title,
+        mediaTitleForms(detail),
+      );
       if (wikiSubdomain) {
         console.log(`[AutoSync] Resolved Fandom wiki for "${detail.title}": ${wikiSubdomain}`);
       }
@@ -150,6 +154,33 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
         }
       }
       characterCandidates = characterCandidates.filter((c) => c.name.length > 0);
+
+      // Fallback: no AniList cast and no Fandom cast → Wikipedia / Kitsu roster.
+      if (characterCandidates.length === 0) {
+        try {
+          const altRoster = await fetchAltCharacterRoster(
+            detail.title,
+            detail.synonyms || [],
+            detail.countryOfOrigin === "KR" ? "MANHWA" : "MANGA",
+            40,
+          );
+          for (const rc of altRoster) {
+            characterCandidates.push({
+              name: normalizeName(rc.name),
+              aliases: rc.aliases,
+              imageUrl: rc.imageUrl,
+              introducedAtChapter: characterCandidates.length === 0 ? 1 : Math.min(15, detail.chapters || 1),
+              role: characterCandidates.length === 0 ? "MAIN" : "SUPPORTING",
+            });
+          }
+          if (altRoster.length > 0) {
+            console.log(`[AutoSync] Fallback sources supplied ${altRoster.length} characters for "${detail.title}".`);
+          }
+        } catch (e) {
+          console.warn(`[AutoSync] Fallback roster failed for ${detail.title}: ${(e as Error).message}`);
+        }
+        characterCandidates = characterCandidates.filter((c) => c.name.length > 0);
+      }
 
       let syncedCharCount = 0;
 

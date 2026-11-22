@@ -12,7 +12,7 @@
  */
 
 import { prisma } from "./prisma";
-import { fetchMediaDetail, fetchPopularMedia } from "./anilist";
+import { fetchMediaDetail, fetchPopularMedia, mediaTitleForms } from "./anilist";
 import {
   fetchCharacterWikitextSmart,
   cleanWikitextForLLM,
@@ -22,6 +22,7 @@ import {
 } from "./fandom";
 import { parseCharacterWikitext, type GeminiParsedCharacter, normalizeGeminiOutput, getGeminiModels } from "./gemini";
 import { resolveCharacterName } from "./name-resolution";
+import { fetchAltCharacterText, fetchAltCharacterRoster } from "./alt-sources";
 import { normalizeName, shouldMergeCharacters, canonicalizeName } from "./name-dedupe";
 import { validateTemporalBounds } from "./temporal";
 import { isBrokenImageUrl } from "./auto-sync";
@@ -168,7 +169,10 @@ async function runCatalogSync(targetAnilistId?: number) {
       });
 
       // Resolve Fandom Wiki (cached)
-      const wikiSubdomain = await resolveFandomWikiSubdomain(anilistDetail.title, anilistDetail.synonyms);
+      const wikiSubdomain = await resolveFandomWikiSubdomain(
+        anilistDetail.title,
+        mediaTitleForms(anilistDetail),
+      );
       if (wikiSubdomain) {
         addLog(`Fandom wiki: "${wikiSubdomain}" untuk ${anilistDetail.title}`);
       }
@@ -219,6 +223,32 @@ async function runCatalogSync(targetAnilistId?: number) {
           }
         } catch (e: any) {
           addLog(`Gagal mengambil karakter Fandom: ${e.message}`);
+        }
+      }
+
+      // Fallback: no Fandom wiki (or it yielded no cast) → Wikipedia / Kitsu.
+      // This is what lets licensed manhwa and small manga still get a cast.
+      if (charactersToSync.length === 0) {
+        try {
+          const altRoster = await fetchAltCharacterRoster(
+            anilistDetail.title,
+            mediaTitleForms(anilistDetail),
+            anilistDetail.countryOfOrigin === "KR" ? "MANHWA" : "MANGA",
+            40,
+          );
+          if (altRoster.length > 0) {
+            addLog(`Sumber alternatif: ditemukan ${altRoster.length} karakter untuk ${anilistDetail.title}.`);
+            for (const rc of altRoster) {
+              charactersToSync.push({
+                name: rc.name,
+                aliases: rc.aliases,
+                imageUrl: rc.imageUrl,
+                role: charactersToSync.length === 0 ? "MAIN" : "SUPPORTING",
+              });
+            }
+          }
+        } catch (e) {
+          addLog(`Gagal mengambil karakter dari sumber alternatif: ${(e as Error).message}`);
         }
       }
 
@@ -593,7 +623,7 @@ REQUIREMENTS:
  * CONSUMES AI TOKENS — only triggered manually via API.
  */
 async function runLoreSync(targetAnilistId?: number) {
-  let mediaList: Array<{ id: string; anilistId: number; title: string; totalChapters: number; chapterNumberingSource: string }>;
+  let mediaList: Array<{ id: string; anilistId: number; title: string; totalChapters: number; chapterNumberingSource: string; type: string }>;
 
   if (targetAnilistId) {
     const m = await prisma.media.findFirst({ where: { anilistId: targetAnilistId } });
@@ -615,8 +645,23 @@ async function runLoreSync(targetAnilistId?: number) {
     addLog(`[${sIdx + 1}/${mediaList.length}] Lore sync: ${media.title}`);
 
     try {
+      // AniList titles (romaji/english/synonyms) greatly improve wiki and
+      // fallback-source matching, but the Media row only stores one title —
+      // fetch the rest lazily (cached).
+      let altSynonyms: string[] | null = null;
+      const getAltSynonyms = async (): Promise<string[]> => {
+        if (altSynonyms) return altSynonyms;
+        try {
+          const detail = await fetchMediaDetail(media.anilistId);
+          altSynonyms = mediaTitleForms(detail);
+        } catch {
+          altSynonyms = [];
+        }
+        return altSynonyms;
+      };
+
       // Resolve Fandom wiki
-      const wikiSubdomain = await resolveFandomWikiSubdomain(media.title);
+      const wikiSubdomain = await resolveFandomWikiSubdomain(media.title, await getAltSynonyms());
 
       const dbCharacters = await prisma.character.findMany({ where: { mediaId: media.id } });
       const allNamesList = dbCharacters.map((c) => c.name);
@@ -673,6 +718,33 @@ async function runLoreSync(targetAnilistId?: number) {
             }
           } catch {
             // fallback
+          }
+        }
+
+        // Fallback source 2: Wikipedia / Kitsu text → same LLM parser.
+        // Used when there is no Fandom wiki, or the wiki has no page for this
+        // character. Keeping the same parser means temporal chapter-bounding is
+        // enforced identically regardless of where the prose came from.
+        if (!parsed) {
+          try {
+            const alt = await fetchAltCharacterText(
+              media.title,
+              dbChar.name,
+              await getAltSynonyms(),
+              media.type === "MANHWA" ? "MANHWA" : "MANGA",
+            );
+            if (alt && alt.text.length >= 200) {
+              addLog(`[Lore Sync] ${dbChar.name}: memakai sumber alternatif (${alt.attribution}).`);
+              const cleaned = cleanWikitextForLLM(alt.text, 8000);
+              parsed = await parseCharacterWikitext(
+                cleaned,
+                dbChar.name,
+                media.chapterNumberingSource,
+                media.totalChapters,
+              );
+            }
+          } catch {
+            // fall through to synthesis
           }
         }
 

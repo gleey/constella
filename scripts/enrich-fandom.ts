@@ -18,7 +18,7 @@
  */
 
 import { prisma } from "../src/lib/prisma";
-import { fetchMediaDetail } from "../src/lib/anilist";
+import { fetchMediaDetail, mediaTitleForms } from "../src/lib/anilist";
 import {
   fetchCharacterWikitextSmart,
   cleanWikitextForLLM,
@@ -131,8 +131,15 @@ async function getTargetMedia(opts: CliOptions) {
   // Filter to those we can resolve a Fandom subdomain for
   const withWiki: typeof allMedia = [];
   for (const media of allMedia) {
-    // Try to resolve without synonyms first; the function generates candidates from title
-    const subdomain = await resolveFandomWikiSubdomain(media.title, []);
+    // Resolve with the full AniList title set (romaji + english + synonyms);
+    // romaji-named wikis are otherwise unmatchable.
+    let titleForms: string[] = [];
+    try {
+      titleForms = mediaTitleForms(await fetchMediaDetail(media.anilistId));
+    } catch {
+      titleForms = [];
+    }
+    const subdomain = await resolveFandomWikiSubdomain(media.title, titleForms);
     if (subdomain) {
       withWiki.push(media);
     } else {
@@ -160,7 +167,7 @@ async function enrichMedia(
   let anilistSynonyms: string[] = [];
   try {
     const anilistDetail = await fetchMediaDetail(media.anilistId);
-    anilistSynonyms = anilistDetail.synonyms || [];
+    anilistSynonyms = mediaTitleForms(anilistDetail);
   } catch {
     console.warn("[WARN] Could not fetch AniList synonyms");
   }
