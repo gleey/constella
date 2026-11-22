@@ -300,9 +300,9 @@ export default function HomePage() {
   const carouselRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
+  const preventCardClickRef = useRef(false);
   const dragStartX = useRef(0);
   const dragStartScrollLeft = useRef(0);
-  const isDragThresholdPassed = useRef(false);
 
   // Close search dropdown on outside click
   useEffect(() => {
@@ -348,7 +348,7 @@ export default function HomePage() {
     if (!carouselRef.current) return;
 
     isDraggingRef.current = true;
-    isDragThresholdPassed.current = false;
+    preventCardClickRef.current = false;
     dragStartX.current = e.clientX;
     dragStartScrollLeft.current = carouselRef.current.scrollLeft;
 
@@ -362,8 +362,8 @@ export default function HomePage() {
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDraggingRef.current || !carouselRef.current) return;
     const deltaX = e.clientX - dragStartX.current;
-    if (Math.abs(deltaX) > 5) {
-      isDragThresholdPassed.current = true;
+    if (Math.abs(deltaX) > 8) {
+      preventCardClickRef.current = true;
     }
     carouselRef.current.scrollLeft = dragStartScrollLeft.current - deltaX;
   };
@@ -377,9 +377,6 @@ export default function HomePage() {
       }
     } catch {}
     setIsDragging(false);
-    setTimeout(() => {
-      isDragThresholdPassed.current = false;
-    }, 50);
   };
 
   useEffect(() => {
@@ -578,10 +575,14 @@ export default function HomePage() {
                     key={item.id}
                     href={`/media/${item.id}`}
                     onClick={(e) => {
-                      if (isDragThresholdPassed.current) {
+                      if (preventCardClickRef.current) {
                         e.preventDefault();
                         e.stopPropagation();
                       }
+                    }}
+                    onPointerDown={() => {
+                      // Reset click prevention at the start of each new interaction
+                      preventCardClickRef.current = false;
                     }}
                     draggable={false}
                     style={{ scrollSnapAlign: "start" }}
