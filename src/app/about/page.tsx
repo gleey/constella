@@ -145,7 +145,7 @@ export default async function AboutPage() {
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-white">Kitsu API</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-300 border border-violet-500/30">
-                  Roster &amp; Status
+                  Public API
                 </span>
               </div>
               <p className="text-slate-300 leading-relaxed">
@@ -159,7 +159,16 @@ export default async function AboutPage() {
                 >
                   Kitsu
                 </a>
-                .
+                . Dipakai melalui API publik gratis sesuai{" "}
+                <a
+                  href="https://kitsu.io/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-violet-400 hover:text-violet-300 underline underline-offset-2 font-medium"
+                >
+                  Kitsu Terms of Service
+                </a>
+                ; Kitsu tidak menyatakan lisensi data formal (database komunitas, backend berlisensi Apache-2.0).
               </p>
             </div>
 
@@ -168,7 +177,7 @@ export default async function AboutPage() {
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-white">MangaUpdates API</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                  Chapter Count
+                  Public API
                 </span>
               </div>
               <p className="text-slate-300 leading-relaxed">
@@ -176,14 +185,14 @@ export default async function AboutPage() {
                 <span className="italic">ongoing</span>, ketika AniList tidak menyediakan angka (AniList melaporkan{" "}
                 <span className="font-mono text-[11px]">chapters: null</span> untuk seri yang belum tamat) —{" "}
                 <a
-                  href="https://www.mangaupdates.com"
+                  href="https://api.mangaupdates.com"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-amber-400 hover:text-amber-300 underline underline-offset-2 font-medium"
                 >
                   MangaUpdates
                 </a>
-                .
+                . Dipakai melalui API publik sesuai ketentuan MangaUpdates; database-nya dikompilasi oleh kontributor sukarelawan dan tidak menyatakan lisensi data formal.
               </p>
             </div>
           </div>
