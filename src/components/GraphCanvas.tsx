@@ -347,6 +347,39 @@ export default function GraphCanvas({
       return true;
     });
     const nodeIdSet = seenNodeIds;
+    const posById = new Map<string, { x: number; y: number }>();
+    for (const el of safeElements) {
+      if (el.group === "nodes" && el.position) {
+        posById.set(el.data.id as string, el.position as { x: number; y: number });
+      }
+    }
+
+    /**
+     * Per-edge bend for unbundled-bezier. Straight spokes are readable but they
+     * run straight through whatever sits between two characters, so every edge
+     * bows sideways. The bow grows with the edge length and is mirrored for
+     * the two directions of the same pair (A→B and B→A split apart), which
+     * stops parallel relations from collapsing onto one line.
+     */
+    const bendForEdge = (source: string, target: string): number => {
+      const a = posById.get(source);
+      const b = posById.get(target);
+      if (!a || !b) return 0;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1) return 0;
+      const mag = Math.max(30, Math.min(110, len * 0.22));
+      let h = 0;
+      const pairKey = [source, target].sort().join("|");
+      for (let i = 0; i < pairKey.length; i++) {
+        h = (h * 31 + pairKey.charCodeAt(i)) | 0;
+      }
+      const pairSign = (h & 1) === 0 ? 1 : -1;
+      const dirSign = source > target ? 1 : -1;
+      return pairSign * dirSign * mag;
+    };
+
     for (const edge of data.edges) {
       if (!nodeIdSet.has(edge.source) || !nodeIdSet.has(edge.target)) continue;
       if (edge.source === edge.target) continue;
@@ -360,6 +393,7 @@ export default function GraphCanvas({
           sensitive: edge.isSensitive,
           category: relationCategory(edge.relationType),
           color: relationCategoryColor(edge.relationType),
+          bend: bendForEdge(edge.source, edge.target),
         },
       });
     }
@@ -492,7 +526,10 @@ export default function GraphCanvas({
             width: 1.8,
             opacity: 0.5,
             "line-color": "data(color)",
-            "curve-style": "bezier",
+            "curve-style": "unbundled-bezier",
+            // Every edge bows sideways by its own distance so a relation never
+            // runs straight through a character node between its endpoints.
+            "control-point-distance": "data(bend)" as unknown as number,
             "target-arrow-shape": "triangle",
             "target-arrow-color": "data(color)",
             "arrow-scale": 0.75,
