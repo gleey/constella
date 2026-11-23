@@ -19,6 +19,8 @@ model Media {
   status                 String         @default("RELEASING") // RELEASING | FINISHED | CANCELLED | HIATUS
   contentRating          String         @default("SAFE")      // SAFE | SUGGESTIVE_18
   genres                 String[]       @default([])
+  // AniList series links: [{ anilistId, title, coverImage, relationType: "PREQUEL"|"SEQUEL" }]
+  relations              Json           @default("[]")
   characters             Character[]
   relationships          Relationship[]
   factions               Faction[]

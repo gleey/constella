@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchMediaDetail } from "@/lib/anilist";
+import { saveMediaRelations } from "@/lib/media-relations";
 import { fetchCharacterWikitextSmart, fetchFandomCategoryCharacters } from "@/lib/fandom";
 import { parseCharacterWikitext, type GeminiParsedCharacter } from "@/lib/gemini";
 import { resolveNames, resolveCharacterName, resolveFactionName } from "@/lib/name-resolution";
@@ -49,6 +50,12 @@ export async function POST(req: NextRequest) {
           countryOfOrigin: anilistData.countryOfOrigin,
         },
       });
+    }
+
+    // Series links (prequel/sequel) — stored even before the related series
+    // is ingested so the UI can show the connection.
+    if (anilistData.relations.length > 0) {
+      await saveMediaRelations(media.id, anilistData.relations);
     }
 
     // 3. Upsert characters from AniList and merge Fandom Category:Characters

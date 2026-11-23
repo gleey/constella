@@ -25,6 +25,16 @@ interface AniListMedia {
   genres?: string[] | null;
   description?: string | null;
   synonyms?: string[];
+  relations?: {
+    edges: {
+      relationType?: string | null;
+      node: {
+        id: number;
+        title: { romaji: string; english: string | null };
+        coverImage: { large: string };
+      };
+    }[];
+  };
   characters?: {
     edges: {
       role?: string;
@@ -87,8 +97,16 @@ export interface CharacterDetail {
   role: string;
 }
 
+export interface MediaRelation {
+  anilistId: number;
+  title: string;
+  coverImage: string;
+  relationType: "PREQUEL" | "SEQUEL";
+}
+
 export interface MediaDetail extends SearchResult {
   characters: CharacterDetail[];
+  relations: MediaRelation[];
 }
 
 /**
@@ -172,6 +190,16 @@ query ($id: Int) {
     isAdult
     genres
     synonyms
+    relations {
+      edges {
+        relationType
+        node {
+          id
+          title { romaji english }
+          coverImage { large }
+        }
+      }
+    }
     characters(sort: [ROLE, RELEVANCE], perPage: 40) {
       edges {
         role
@@ -334,6 +362,14 @@ export async function fetchMediaDetail(anilistId: number): Promise<MediaDetail> 
     contentRating: determineContentRating(m.isAdult, m.genres),
     genres: m.genres || [],
     synonyms: m.synonyms || [],
+    relations: (m.relations?.edges || [])
+      .filter((e) => e.relationType === "PREQUEL" || e.relationType === "SEQUEL")
+      .map((e) => ({
+        anilistId: e.node.id,
+        title: e.node.title.english ?? e.node.title.romaji,
+        coverImage: e.node.coverImage?.large || "",
+        relationType: e.relationType as "PREQUEL" | "SEQUEL",
+      })),
     characters: edges.map((edge) => {
       const c = edge.node;
       const aliasSet = new Set<string>();

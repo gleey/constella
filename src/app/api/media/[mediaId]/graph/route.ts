@@ -6,6 +6,7 @@ import {
   characterVisibleAt,
   factionVisibleAt,
 } from "@/lib/temporal";
+import { normalizeRelations, relatedMediaIds, earliestRelatedDebut } from "@/lib/media-relations";
 
 /**
  * GET /api/media/[mediaId]/graph?chapter=N
@@ -34,7 +35,7 @@ export async function GET(
   // Validate media exists
   const media = await prisma.media.findUnique({
     where: { id: mediaId },
-    select: { id: true, totalChapters: true },
+    select: { id: true, totalChapters: true, relations: true },
   });
 
   if (!media) {
@@ -62,6 +63,7 @@ export async function GET(
     select: {
       id: true,
       name: true,
+      aliases: true,
       imageUrl: true,
       introducedAtChapter: true,
       debutKnown: true,
@@ -70,6 +72,28 @@ export async function GET(
   });
 
   const characterIds = new Set(characters.map((c) => c.id));
+
+  // ── Cross-series reuse ──────────────────────────────────────────────
+  // A character that also appears in a linked series (AniList PREQUEL/SEQUEL)
+  // is one node here, with the earliest debut across both. Names are matched
+  // conservatively (shouldMergeCharacters: canonical-equal, token-reorder, or a
+  // curated transliteration pair) — no fuzzy guessing across series.
+  const relatedChars: {
+    name: string;
+    aliases: string[];
+    introducedAtChapter: number;
+    debutKnown: boolean;
+  }[] = [];
+  const mediaRelations = normalizeRelations(media.relations);
+  const relatedIds = [...(await relatedMediaIds(mediaRelations)).values()];
+  if (relatedIds.length > 0) {
+    relatedChars.push(
+      ...(await prisma.character.findMany({
+        where: { mediaId: { in: relatedIds } },
+        select: { name: true, aliases: true, introducedAtChapter: true, debutKnown: true },
+      })),
+    );
+  }
 
   // ── Protagonist: stable for the whole series, never re-derived per chapter ─
   // A per-chapter "most connected visible node" made the MC flip as the slider
@@ -157,12 +181,13 @@ export async function GET(
     const factions = membershipsByChar.get(c.id) ?? [];
     const status = statusByChar.get(c.id) ?? null;
     const description = descByChar.get(c.id) ?? null;
+    const cross = earliestRelatedDebut(c, relatedChars);
     return {
       id: c.id,
       name: c.name,
       imageUrl: c.imageUrl,
-      debutChapter: c.introducedAtChapter,
-      debutKnown: c.debutKnown,
+      debutChapter: cross ? Math.min(c.introducedAtChapter, cross.chapter) : c.introducedAtChapter,
+      debutKnown: c.debutKnown || (cross?.known ?? false),
       isProtagonist: c.isProtagonist,
       status,
       description,

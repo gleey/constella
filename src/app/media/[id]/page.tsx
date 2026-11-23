@@ -17,6 +17,16 @@ interface MediaHeader {
   coverImage: string;
   totalChapters: number;
   chapterNumberingSource: string;
+  relations: MediaRelation[];
+}
+
+interface MediaRelation {
+  anilistId: number;
+  title: string;
+  coverImage: string;
+  relationType: "PREQUEL" | "SEQUEL";
+  /** local media id when the related series is already ingested, else null */
+  mediaId: string | null;
 }
 
 /** Plain-language labels for the internal chapter-numbering codes. */
@@ -43,12 +53,10 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     async function loadMedia() {
       try {
-        const res = await fetch("/api/media");
-        const list: MediaHeader[] = await res.json();
-        const found = list.find((m) => m.id === mediaId);
-        if (found) {
-          setMedia(found);
-        }
+        const res = await fetch(`/api/media/${mediaId}`);
+        if (!res.ok) return;
+        const found: MediaHeader = await res.json();
+        setMedia(found);
       } catch (e) {
         console.error("Failed to load media info", e);
       }
@@ -155,6 +163,36 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
                     Chapters: {NUMBERING_LABELS[media.chapterNumberingSource] ?? media.chapterNumberingSource}
                   </span>
                 </div>
+                {media.relations.length > 0 && (
+                  <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400 min-w-0">
+                    {media.relations.map((r) => {
+                      const label = `${r.relationType === "PREQUEL" ? "Prequel" : "Sequel"}: ${r.title}`;
+                      return r.mediaId ? (
+                        <Link
+                          key={r.anilistId}
+                          href={`/media/${r.mediaId}`}
+                          className="inline-flex items-center gap-1 rounded-md bg-white/5 px-1.5 py-0.5 ring-1 ring-white/10 hover:bg-white/10 hover:text-white transition-colors truncate max-w-full"
+                        >
+                          <span className="text-indigo-300 font-semibold shrink-0">
+                            {r.relationType === "PREQUEL" ? "Prequel" : "Sequel"}
+                          </span>
+                          <span className="truncate">{r.title}</span>
+                        </Link>
+                      ) : (
+                        <span
+                          key={r.anilistId}
+                          title="Seri terkait belum ada di katalog"
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 opacity-50 truncate max-w-full"
+                        >
+                          <span className="font-semibold shrink-0">
+                            {r.relationType === "PREQUEL" ? "Prequel" : "Sequel"}
+                          </span>
+                          <span className="truncate">{r.title}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}
