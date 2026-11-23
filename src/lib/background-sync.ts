@@ -678,21 +678,18 @@ async function runLoreSync(targetAnilistId?: number, batch?: number) {
     if (!m) throw new Error(`Media AniList ID ${targetAnilistId} tidak ditemukan di database`);
     mediaList = [m];
   } else if (batch && batch > 0) {
-    // Automatic cycles take a small, token-bounded slice: series whose
-    // characters have no approved lore draft yet. The slice rotates as drafts
-    // get approved, so a weekly cycle spreads the AI spend instead of burning
-    // the whole catalog at once.
-    const approved = await prisma.draftIngestion.findMany({
-      where: { status: "APPROVED" },
-      select: { mediaId: true },
-    });
-    const approvedIds = new Set(approved.map((d) => d.mediaId));
+    // Automatic cycles take a small, token-bounded slice: series that have no
+    // lore draft of any status yet. Skipping pending drafts too is what makes
+    // the slice rotate — otherwise every weekly cycle re-picks the same first
+    // titles and burns tokens on characters already waiting for review.
+    const drafted = await prisma.draftIngestion.findMany({ select: { mediaId: true } });
+    const draftedIds = new Set(drafted.map((d) => d.mediaId));
     const pending = await prisma.media.findMany({
       where: { characters: { some: {} } },
       orderBy: { title: "asc" },
     });
-    mediaList = pending.filter((m) => !approvedIds.has(m.id)).slice(0, batch);
-    addLog(`[Lore Sync] Batch otomatis: ${mediaList.length} seri dipilih dari ${pending.length} seri tanpa lore.`);
+    mediaList = pending.filter((m) => !draftedIds.has(m.id)).slice(0, batch);
+    addLog(`[Lore Sync] Batch otomatis: ${mediaList.length} seri dipilih dari ${pending.length - draftedIds.size} seri tanpa draft.`);
   } else {
     mediaList = await prisma.media.findMany();
   }
