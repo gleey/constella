@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-export default function AdminLoginPage() {
+function AdminLoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -25,7 +26,12 @@ export default function AdminLoginPage() {
         setError(data?.error || "Login gagal. Coba lagi.");
         return;
       }
-      router.push("/admin");
+      // Return to wherever the middleware bounced the user from (custom admin
+      // path or a deep admin link), defaulting to the admin root. Only allow
+      // same-origin relative paths to avoid open-redirect.
+      const next = searchParams.get("next");
+      const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/admin";
+      router.push(target);
       router.refresh();
     } catch {
       setError("Tidak dapat terhubung ke server.");
@@ -98,5 +104,19 @@ export default function AdminLoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function AdminLoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center px-4">
+          <p className="text-slate-500 text-sm">Memuat…</p>
+        </div>
+      }
+    >
+      <AdminLoginForm />
+    </Suspense>
   );
 }

@@ -3,6 +3,19 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 
+/**
+ * Build the login URL for the CURRENT admin surface. When the admin UI is
+ * served under a custom ADMIN_PATH (e.g. /console-x7k29q), the login page
+ * lives under that same surface, so derive it from the current pathname
+ * instead of hardcoding /admin/login.
+ */
+function adminLoginHref(): string {
+  if (typeof window === "undefined") return "/admin/login";
+  const segs = window.location.pathname.split("/").filter(Boolean);
+  const base = segs.length > 0 ? `/${segs[0]}` : "/admin";
+  return `${base}/login`;
+}
+
 interface MediaItem {
   id: string;
   anilistId?: number;
@@ -681,7 +694,7 @@ export default function AdminPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Link
-                  href="/admin/login"
+                  href={adminLoginHref()}
                   className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors"
                 >
                   Buka Halaman Login

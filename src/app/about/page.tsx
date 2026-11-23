@@ -67,7 +67,7 @@ export default async function AboutPage() {
           <div className="flex items-center gap-2.5">
             <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
             <h2 className="text-base font-bold text-white tracking-tight">
-              Atribusi Sumber Data &amp; Lisensi (Wajib)
+              Atribusi Sumber Data &amp; Lisensi
             </h2>
           </div>
 

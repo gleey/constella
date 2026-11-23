@@ -1,15 +1,69 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+/**
+ * Resolve the configured admin surface path. When ADMIN_PATH is set (e.g.
+ * "console-x7k29q"), the admin UI lives at /<ADMIN_PATH> and the plain /admin
+ * path is hidden (404). This is an obscurity layer to cut down random scanner
+ * noise — the real defense remains the signed session cookie + password.
+ * Keeping it in an env var means the path can change per-deploy without a
+ * code change, and the value is never shipped to the client bundle.
+ */
+function getAdminPath(): string {
+  const raw = (process.env.ADMIN_PATH || "").trim().replace(/^\/+|\/+$/g, "");
+  return raw || "admin";
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const method = request.method;
+  const adminPath = getAdminPath();
 
   // The login endpoint validates the secret itself and issues the signed
   // session cookie — protecting it with middleware would deadlock the login.
   const isAuthLogin = pathname === "/api/admin/auth";
 
-  // Protect admin API routes and destructive/mutating endpoints
+  // -------------------------------------------------------------------------
+  // 1. Admin PAGE gating: unauthenticated visitors are bounced to the login
+  //    page before any admin markup is served. This covers the real /admin
+  //    tree (when it is the active path) and any custom ADMIN_PATH surface
+  //    that next.config rewrites onto it.
+  // -------------------------------------------------------------------------
+  const isLoginPage = pathname === "/admin/login" || pathname === `/${adminPath}/login`;
+  const isAdminPage =
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
+    pathname === `/${adminPath}` ||
+    pathname.startsWith(`/${adminPath}/`);
+
+  if (isAdminPage) {
+    // Hide the default /admin surface when a custom path is configured, except
+    // for its login page (kept so redirects always have a stable target).
+    if (adminPath !== "admin" && pathname.startsWith("/admin") && pathname !== "/admin/login") {
+      return new NextResponse(null, { status: 404 });
+    }
+
+    const secret = process.env.ADMIN_SECRET || process.env.ADMIN_TOKEN || "";
+    // In non-production with no secret configured, allow through for easy dev.
+    const devBypass = !secret && process.env.NODE_ENV !== "production";
+    if (!devBypass && !isLoginPage) {
+      const cookieToken = request.cookies.get("admin_token")?.value || "";
+      const valid =
+        cookieToken &&
+        secret &&
+        (cookieToken === secret || (await verifySignedCookie(secret, cookieToken)));
+      if (!valid) {
+        const loginUrl = new URL(`/${adminPath}/login`, request.url);
+        // Preserve where the user was heading so we can return after login.
+        loginUrl.searchParams.set("next", pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 2. Admin API + mutating endpoint protection.
+  // -------------------------------------------------------------------------
   const isProtectedApi =
     !isAuthLogin &&
     (pathname.startsWith("/api/admin") ||
@@ -90,8 +144,12 @@ async function verifySignedCookie(secret: string, value: string): Promise<boolea
 
 export const config = {
   matcher: [
+    "/admin/:path*",
     "/api/admin/:path*",
     "/api/pages/:path*",
     "/api/media/:path*",
+    // Custom admin surface — matched only when ADMIN_PATH is set; the
+    // middleware body decides whether it is active.
+    "/:adminPath((?!api|_next|.*\\..*).*)",
   ],
 };
