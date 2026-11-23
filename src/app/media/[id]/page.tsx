@@ -8,6 +8,7 @@ import ChapterSlider from "@/components/ChapterSlider";
 import CharacterSearch from "@/components/CharacterSearch";
 import FloatingPanel from "@/components/FloatingPanel";
 import type { GraphResponse, GraphNode } from "@/lib/types";
+import { RELATION_CATEGORIES } from "@/lib/relations";
 
 interface MediaHeader {
   id: string;
@@ -198,38 +199,55 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
               focusNodeId={focusNodeId}
             />
 
-            {/* Faction legend bar */}
-            {data.factions.length > 0 && (
-              <div className="absolute top-6 left-6 z-20 bg-[#0d1322]/90 backdrop-blur-xl px-3.5 py-2 rounded-full ring-1 ring-white/10 shadow-lg shadow-black/30 hidden md:flex items-center gap-3">
-                <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
-                  Faction:
-                </span>
-                <div className="flex items-center gap-2.5">
-                  {data.factions.map((f) => (
-                    <div
-                      key={f.id}
-                      className="flex items-center gap-1.5 text-xs text-slate-300"
-                    >
-                      <span
-                        className="w-2.5 h-2.5 rounded-full ring-1 ring-white/20"
-                        style={{ backgroundColor: f.colorHex || "#818cf8" }}
-                      />
-                      <span>{f.name}</span>
-                    </div>
-                  ))}
+            {/* Legends: faction colours, debut-unknown marker, relation categories.
+                Satu kolom kiri-atas supaya tidak bertabrakan dengan panel kanan;
+                di mobile rail faksi bisa digeser horizontal. */}
+            <div className="absolute top-3 left-3 sm:top-6 sm:left-6 z-20 flex flex-col items-start gap-1.5 max-w-[calc(100%-1.5rem)] sm:max-w-[min(65%,44rem)] pointer-events-none">
+              {data.factions.length > 0 && (
+                <div className="pointer-events-auto flex items-center gap-2 sm:gap-3 bg-[#0d1322]/90 backdrop-blur-xl px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl sm:rounded-full ring-1 ring-white/10 shadow-lg shadow-black/30 overflow-x-auto no-scrollbar max-w-full">
+                  <span className="text-[9px] sm:text-[10px] uppercase tracking-wider font-bold text-slate-400 shrink-0">
+                    Faction:
+                  </span>
+                  <div className="flex items-center gap-2 sm:gap-2.5">
+                    {data.factions.map((f) => (
+                      <div
+                        key={f.id}
+                        className="flex items-center gap-1.5 text-[11px] sm:text-xs text-slate-300 shrink-0"
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-full ring-1 ring-white/20"
+                          style={{ backgroundColor: f.colorHex || "#818cf8" }}
+                        />
+                        <span>{f.name}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Debut-unknown legend (hanya muncul bila ada karakter tanpa data debut) */}
-            {data.nodes.some((n) => n.debutKnown === false) && (
-              <div className="absolute top-16 left-6 z-20 bg-[#0d1322]/90 backdrop-blur-xl px-3 py-1.5 rounded-full ring-1 ring-white/10 shadow-lg shadow-black/30 hidden md:flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full border-2 border-dashed border-slate-400" />
-                <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
-                  Debut unknown
-                </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {data.nodes.some((n) => n.debutKnown === false) && (
+                  <span className="pointer-events-auto flex items-center gap-1.5 bg-[#0d1322]/90 backdrop-blur-xl px-2.5 py-1 rounded-full ring-1 ring-white/10 shadow-lg shadow-black/30">
+                    <span className="w-2.5 h-2.5 rounded-full border-2 border-dashed border-slate-400" />
+                    <span className="text-[9px] sm:text-[10px] uppercase tracking-wider font-bold text-slate-400">
+                      Debut unknown
+                    </span>
+                  </span>
+                )}
+                {data.edges.length > 0 &&
+                  RELATION_CATEGORIES.map((c) => (
+                    <span
+                      key={c.id}
+                      className="pointer-events-auto flex items-center gap-1.5 bg-[#0d1322]/90 backdrop-blur-xl px-2.5 py-1 rounded-full ring-1 ring-white/10 shadow-lg shadow-black/30"
+                    >
+                      <span className="w-3.5 h-0.5 rounded-full" style={{ backgroundColor: c.color }} />
+                      <span className="text-[9px] sm:text-[10px] uppercase tracking-wider font-bold text-slate-400">
+                        {c.label}
+                      </span>
+                    </span>
+                  ))}
               </div>
-            )}
+            </div>
 
             {/* Floating profile & unlocked relations panel */}
             <FloatingPanel

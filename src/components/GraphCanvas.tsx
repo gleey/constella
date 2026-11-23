@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import cytoscape, { type Core } from "cytoscape";
 import type { GraphResponse, GraphFaction, GraphNode } from "@/lib/types";
+import { relationCategory, relationCategoryColor } from "@/lib/relations";
 
 interface Props {
   data: GraphResponse;
@@ -357,6 +358,8 @@ export default function GraphCanvas({
           target: edge.target,
           label: edge.relationType,
           sensitive: edge.isSensitive,
+          category: relationCategory(edge.relationType),
+          color: relationCategoryColor(edge.relationType),
         },
       });
     }
@@ -454,14 +457,16 @@ export default function GraphCanvas({
         {
           selector: "node.selected",
           style: {
-            width: 60,
-            height: 60,
-            "border-width": 4,
+            width: 88,
+            height: 88,
+            "border-width": 6,
             "border-color": "#38bdf8",
             "underlay-color": "#38bdf8",
-            "underlay-padding": 6,
-            "underlay-opacity": 0.35,
-            color: "#38bdf8",
+            "underlay-padding": 14,
+            "underlay-opacity": 0.45,
+            color: "#7dd3fc",
+            "font-size": "13px",
+            "z-index": 30,
           },
         },
         {
@@ -476,17 +481,18 @@ export default function GraphCanvas({
             "underlay-opacity": 0.45,
           },
         },
-        // Relationship edges — label disembunyikan agar tidak menimpa node.
-        // Muncul hanya saat node/edge dipilih (lihat selector di bawah).
+        // Relationship edges — coloured by relation category (family / friend /
+        // enemy / other). Label disembunyikan agar tidak menimpa node; muncul
+        // hanya saat node/edge dipilih (lihat selector di bawah).
         {
           selector: "edge",
           style: {
             width: 1.8,
-            opacity: 0.7,
-            "line-color": "#3f4d63",
+            opacity: 0.5,
+            "line-color": "data(color)",
             "curve-style": "bezier",
             "target-arrow-shape": "triangle",
-            "target-arrow-color": "#3f4d63",
+            "target-arrow-color": "data(color)",
             "arrow-scale": 0.75,
           },
         },
@@ -495,24 +501,25 @@ export default function GraphCanvas({
           style: {
             "line-style": "dashed",
             "line-dash-pattern": [6, 4],
-            "line-color": "#4b5a72",
-            "target-arrow-color": "#4b5a72",
+            opacity: 0.4,
           },
         },
         {
           selector: "edge.highlighted, edge:selected",
           style: {
-            width: 3,
+            width: 4.5,
             opacity: 1,
-            "line-color": "#818cf8",
-            "target-arrow-color": "#818cf8",
+            "line-color": "data(color)",
+            "target-arrow-color": "data(color)",
+            "arrow-scale": 1.1,
+            "z-index": 20,
             label: "data(label)",
-            "font-size": "10px",
-            "font-weight": 600,
-            color: "#e0e7ff",
+            "font-size": "11px",
+            "font-weight": 700,
+            color: "#f1f5f9",
             "text-background-color": "#090d16",
             "text-background-opacity": 0.95,
-            "text-background-padding": "3px",
+            "text-background-padding": "4px",
             "text-background-shape": "roundrectangle",
             "text-rotation": "autorotate",
           },
@@ -603,7 +610,7 @@ export default function GraphCanvas({
       {/* Canvas Hint */}
       <div className="absolute bottom-4 right-4 z-10 pointer-events-none hidden sm:block">
         <span className="text-[11px] text-slate-400 bg-[#0b0f19]/90 px-3 py-1.5 rounded-full border border-[#1e293b]">
-          Main character centered • Faction-colored sectors • Dashed grey = debut unknown • Click a node for bio & relations
+          Main character centered • Faction-colored sectors • Dashed grey = debut unknown • Line colour = relation type • Click a node for bio & relations
         </span>
       </div>
     </div>

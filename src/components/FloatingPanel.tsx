@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import type { GraphNode, GraphEdge, GraphFaction } from "@/lib/types";
+import { relationCategoryColor } from "@/lib/relations";
 import SpoilerToggle from "./SpoilerToggle";
 
 interface FloatingPanelProps {
@@ -268,6 +269,7 @@ export default function FloatingPanel({
                   partner.factions?.find((f) => !f.isSensitive)?.factionId ??
                   partner.factions?.[0]?.factionId;
                 const pFac = pFacId ? factionMap.get(pFacId) : null;
+                const catColor = relationCategoryColor(edge.relationType);
 
                 return (
                   <button
@@ -305,7 +307,10 @@ export default function FloatingPanel({
 
                     <div className="shrink-0 text-right">
                       {edge.isSensitive ? (
-                        <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-500/10 ring-1 ring-indigo-500/40 text-[#c7d2fe] inline-flex items-center gap-1">
+                        <span
+                          className="px-2 py-0.5 rounded-md text-[11px] font-semibold inline-flex items-center gap-1"
+                          style={{ backgroundColor: `${catColor}1f`, color: catColor, boxShadow: `inset 0 0 0 1px ${catColor}55` }}
+                        >
                           {edge.relationType}
                           <span
                             className="w-1.5 h-1.5 rounded-full bg-amber-400"
@@ -313,7 +318,10 @@ export default function FloatingPanel({
                           />
                         </span>
                       ) : (
-                        <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-white/5 ring-1 ring-white/10 text-slate-200">
+                        <span
+                          className="px-2 py-0.5 rounded-md text-[11px] font-semibold"
+                          style={{ backgroundColor: `${catColor}1f`, color: catColor, boxShadow: `inset 0 0 0 1px ${catColor}44` }}
+                        >
                           {edge.relationType}
                         </span>
                       )}
