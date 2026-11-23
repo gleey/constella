@@ -361,10 +361,11 @@ Constella menyandarkan data pada sumber publik berikut dan wajib mencantumkan kr
 | **[Wikipedia](https://en.wikipedia.org)** | Sumber cadangan karakter: artikel "List of ... characters" dan bagian karakter pada artikel seri, ketika wiki Fandom tidak memadai | [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 | **[Kitsu API](https://kitsu.io)** | Sumber cadangan daftar karakter per media, nama alternatif, potret karakter, dan bio singkat; juga status rilis dan verifikasi identitas seri via mapping `anilist/manga` | Free public API — [Kitsu ToS](https://kitsu.io/terms); database komunitas tanpa lisensi data formal (backend Apache-2.0) |
 | **[MangaUpdates API](https://api.mangaupdates.com)** | Jumlah bab terkini untuk seri yang masih *ongoing* (AniList melaporkan `chapters: null` untuk seri yang belum tamat) | Public API — [MangaUpdates ToS](https://www.mangaupdates.com/aboutus); database hasil kontribusi sukarelawan tanpa lisensi data formal |
+| **[MangaDex API](https://api.mangadex.org/docs/)** | Cadangan jumlah bab & status rilis saat MangaUpdates *down* (bab tertinggi dari rilisan scanlation, verifikasi judul + tipe publikasi, penolakan doujin/spin-off) | Free public API — [MangaDex ToS](https://mangadex.org/compliance) |
 
 **Urutan sumber karakter:** wiki Fandom (dedicated) → section hub Fandom → artikel karakter Wikipedia → bio Kitsu → sintesis AI murni. Teks dari sumber mana pun melewati tahap ekstraksi AI yang sama, sehingga batas bab temporal tetap ditegakkan identik.
 
-**Urutan jumlah bab:** AniList → MangaUpdates → nilai tersimpan → *floor* 100 (hanya bila semua sumber gagal).
+**Urutan jumlah bab:** AniList → MangaUpdates → MangaDex → Kitsu → nilai tersimpan → *floor* 100 (hanya bila semua sumber gagal). MangaDex otomatis mengambil alih saat circuit breaker MangaUpdates aktif (outage 502/504).
 
 Atribusi lengkap dapat dilihat pada halaman `/about` dan footer global yang tampil di seluruh halaman.
 

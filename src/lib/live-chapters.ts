@@ -2,6 +2,7 @@ import https from "node:https";
 import { prisma } from "./prisma";
 import { cacheGet, cacheSet } from "./api-cache";
 import { findKitsuChapterInfo } from "./kitsu-chapters";
+import { findMangaDexInfo } from "./mangadex";
 
 // In-memory cache for live manga info to prevent redundant queries
 export type MediaReleaseStatus = "RELEASING" | "FINISHED" | "CANCELLED" | "HIATUS";
@@ -232,10 +233,14 @@ function pickMangaUpdatesRecord(
  *     and it publishes a series-wide total ("652 Chapters (Ongoing)") when
  *     one exists. Its identity check is a title match, so it is guarded by
  *     type and exact-title matching.
+ *   - MangaDex is the outage fallback: when MangaUpdates yields nothing
+ *     (breaker open during its 502/504 spells, or a search miss), MangaDex's
+ *     `lastChapter` + `status` fill the gap with the same exact-title,
+ *     type-checked, doujin-rejecting identity policy.
  *
- * Therefore: the count comes from MangaUpdates, the status from Kitsu (with
- * MangaUpdates as a fallback), and Kitsu's count is used only when
- * MangaUpdates has nothing at all.
+ * Therefore: the count comes from MangaUpdates, then MangaDex, then Kitsu;
+ * the status comes from Kitsu first (authoritative via its AniList mapping),
+ * then MangaUpdates, then MangaDex.
  */
 export async function fetchLiveMangaInfo(
   title: string,
@@ -344,7 +349,28 @@ export async function fetchLiveMangaInfo(
   }
   }
 
-  // 3. Kitsu only.
+  // 3. MangaDex — outage fallback for the live chapter count. Only consulted
+  //    when MangaUpdates produced nothing (breaker open / search miss /
+  //    detail failure): MangaUpdates stays the primary source whenever it is
+  //    healthy. MangaDex's `lastChapter` is the closest public approximation
+  //    of the live total for ongoing series, and its identity guard
+  //    (exact title + language type + doujin rejection) matches the same
+  //    "no confident match, no count" policy as the MangaUpdates picker.
+  try {
+    const md = await findMangaDexInfo(normalizedTitle, titleForms, expectedType);
+    if (md && (md.chapters !== null || md.status !== null)) {
+      const data: LiveMangaData = {
+        chapters: md.chapters ?? kitsuChapters,
+        status: kitsuStatus ?? md.status,
+      };
+      liveMangaCache.set(cacheKey, { data, timestamp: Date.now() });
+      return data;
+    }
+  } catch {
+    // non-fatal — fall through to Kitsu only
+  }
+
+  // 4. Kitsu only.
   if (kitsuStatus || kitsuChapters !== null) {
     const data: LiveMangaData = { chapters: kitsuChapters, status: kitsuStatus };
     liveMangaCache.set(cacheKey, { data, timestamp: Date.now() });

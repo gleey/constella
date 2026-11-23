@@ -188,6 +188,24 @@ export default function Footer() {
               >
                 MangaUpdates ToS
               </a>
+              ), with the{" "}
+              <a
+                href="https://api.mangadex.org/docs/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-300 hover:text-indigo-300 underline underline-offset-2"
+              >
+                MangaDex API
+              </a>{" "}
+              as outage fallback (free public API per{" "}
+              <a
+                href="https://mangadex.org/compliance"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-300 hover:text-indigo-300 underline underline-offset-2"
+              >
+                MangaDex ToS
+              </a>
               ).
             </p>
           </div>

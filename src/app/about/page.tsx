@@ -195,6 +195,38 @@ export default async function AboutPage() {
                 . Dipakai melalui API publik sesuai ketentuan MangaUpdates; database-nya dikompilasi oleh kontributor sukarelawan dan tidak menyatakan lisensi data formal.
               </p>
             </div>
+
+            {/* MangaDex Credit */}
+            <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-white">MangaDex API</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                  Public API
+                </span>
+              </div>
+              <p className="text-slate-300 leading-relaxed">
+                Cadangan jumlah bab &amp; status rilis ketika MangaUpdates sedang tidak dapat dihubungi (
+                <span className="italic">outage</span>) — jumlah bab diambil dari chapter tertinggi yang dirilis scanlation, dengan verifikasi identitas judul yang sama ketatnya —{" "}
+                <a
+                  href="https://api.mangadex.org/docs/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-rose-400 hover:text-rose-300 underline underline-offset-2 font-medium"
+                >
+                  MangaDex
+                </a>
+                . Dipakai melalui API publik gratis sesuai{" "}
+                <a
+                  href="https://mangadex.org/compliance"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-rose-400 hover:text-rose-300 underline underline-offset-2 font-medium"
+                >
+                  MangaDex ToS
+                </a>
+                .
+              </p>
+            </div>
           </div>
         </div>
 

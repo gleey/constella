@@ -2,9 +2,10 @@
  * Kitsu as a live chapter-count source.
  *
  * Why Kitsu and not MangaDex/Jikan:
- *   - MangaDex is unreachable from this deployment (connection timeouts on
- *     api.mangadex.org, verified with curl and node https).
- *   - Jikan times out here too, and its data is a MAL mirror — mostly a
+ *   - MangaDex hangs on IPv6 from this deployment, but responds over IPv4 —
+ *     it is now wired in as the MangaUpdates outage fallback (mangadex.ts),
+ *     called through the same IPv4-forced transport as live-chapters.ts.
+ *   - Jikan times out here, and its data is a MAL mirror — mostly a
  *     duplicate of AniList.
  *   - Kitsu is already a proven source in this project (alt-sources.ts), and
  *     it exposes BOTH a `chapterCount` that is kept current for ongoing
