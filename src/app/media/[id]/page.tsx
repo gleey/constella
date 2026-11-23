@@ -19,6 +19,14 @@ interface MediaHeader {
   chapterNumberingSource: string;
 }
 
+/** Plain-language labels for the internal chapter-numbering codes. */
+const NUMBERING_LABELS: Record<string, string> = {
+  official_en: "Official English",
+  raw_kr: "Raw Korean",
+  raw_jp: "Raw Japanese",
+  scanlation: "Scanlation",
+};
+
 export default function MediaGraphPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const mediaId = resolvedParams.id;
@@ -141,7 +149,7 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
                     {media.type}
                   </span>
                   <span className="truncate">
-                    Source: {media.chapterNumberingSource}
+                    Chapters: {NUMBERING_LABELS[media.chapterNumberingSource] ?? media.chapterNumberingSource}
                   </span>
                 </div>
               </div>
@@ -179,10 +187,10 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0b0f19]/80 backdrop-blur-sm text-slate-300">
             <div className="w-12 h-12 border-4 border-white/10 border-t-indigo-400 rounded-full animate-spin mb-4" />
             <p className="text-sm font-semibold tracking-wide">
-              Constructing zero-spoiler temporal graph...
+              Loading character map…
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              Applying Layer 1 backend filter for Chapter {chapter}
+              Chapter {chapter}
             </p>
           </div>
         )}

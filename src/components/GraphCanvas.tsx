@@ -575,9 +575,8 @@ export default function GraphCanvas({
       {/* Cytoscape init fallback (no more full-page crash) */}
       {initError && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0b0f19]/95 text-center px-6">
-          <p className="text-sm font-semibold text-red-300">Graph failed to render</p>
-          <p className="text-xs text-slate-400 mt-1 max-w-md">{initError}</p>
-          <p className="text-xs text-slate-500 mt-2">Try changing chapter or reloading the page.</p>
+          <p className="text-sm font-semibold text-red-300">The character map could not be drawn</p>
+          <p className="text-xs text-slate-400 mt-2">Try another chapter or reload the page.</p>
         </div>
       )}
 

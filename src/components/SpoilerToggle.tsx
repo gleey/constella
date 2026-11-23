@@ -25,7 +25,7 @@ export default function SpoilerToggle({
   children,
   isSensitive,
   resetKey,
-  placeholder = "[Spoiler ▼]",
+  placeholder = "Spoiler — tap to reveal",
   className = "",
 }: Props) {
   const [revealed, setRevealed] = useState(false);
@@ -48,7 +48,7 @@ export default function SpoilerToggle({
         className={`inline-flex items-center gap-1.5 text-left cursor-pointer text-amber-300 hover:text-amber-200 transition ${className}`}
       >
         <span>{displayContent}</span>
-        <span className="text-[10px] text-slate-400 font-mono">[Hide ▲]</span>
+        <span className="text-[10px] text-slate-400 font-semibold">Hide</span>
       </button>
     );
   }

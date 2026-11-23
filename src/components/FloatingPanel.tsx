@@ -127,7 +127,7 @@ export default function FloatingPanel({
                         {node.status.status}
                       </span>
                     }
-                    placeholder="Status Classified"
+                    placeholder="Status hidden (spoiler)"
                     resetKey={chapter}
                   />
                 ) : (
@@ -159,9 +159,9 @@ export default function FloatingPanel({
         {/* Description section */}
         <div>
           <h3 className="text-[11px] font-bold text-[#a5b4fc] uppercase tracking-wider mb-2 flex items-center justify-between">
-            <span>Character Description</span>
+            <span>About this character</span>
             <span className="text-[10px] text-slate-500 font-normal normal-case tracking-normal">
-              Ch. {chapter} Zero-Spoiler
+              As of chapter {chapter}
             </span>
           </h3>
 
@@ -169,7 +169,7 @@ export default function FloatingPanel({
             {/* Embedded debut reference inside description box */}
             {node.debutKnown === false ? (
               <div className="mb-2.5 pb-2.5 border-b border-white/5 text-[11px] text-slate-400 flex items-center justify-between">
-                <span>Story Introduction:</span>
+                <span>First appearance:</span>
                 <span className="font-semibold text-slate-400">
                   Debut unknown
                 </span>
@@ -177,7 +177,7 @@ export default function FloatingPanel({
             ) : (
               node.debutChapter && (
                 <div className="mb-2.5 pb-2.5 border-b border-white/5 text-[11px] text-slate-400 flex items-center justify-between">
-                  <span>Story Introduction:</span>
+                  <span>First appearance:</span>
                   <span className="font-semibold text-sky-300">
                     Chapter {node.debutChapter}
                   </span>
@@ -190,11 +190,11 @@ export default function FloatingPanel({
                 <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2 pb-1.5 border-b border-white/5">
                   <span className="flex items-center gap-1.5 text-slate-300">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Current Arc at Chapter {chapter}
+                    Story so far — chapter {chapter}
                   </span>
                   {node.description.isSensitive && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30 font-mono">
-                      Spoiler Protected
+                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30 font-semibold">
+                      Spoiler
                     </span>
                   )}
                 </div>
@@ -202,7 +202,7 @@ export default function FloatingPanel({
                   <SpoilerToggle
                     isSensitive={true}
                     content={node.description.text}
-                    placeholder="[Sensitive Story Details — Click to Reveal]"
+                    placeholder="Hidden to avoid spoilers — tap to reveal"
                     resetKey={chapter}
                   />
                 ) : (
@@ -221,7 +221,7 @@ export default function FloatingPanel({
         {node.factions.length > 0 && (
           <div>
             <h3 className="text-[11px] font-bold text-[#a5b4fc] uppercase tracking-wider mb-2">
-              Affiliations at Ch. {chapter}
+              Groups at chapter {chapter}
             </h3>
             <div className="flex flex-wrap gap-1.5">
               {node.factions.map((nf) => {
@@ -244,21 +244,21 @@ export default function FloatingPanel({
           </div>
         )}
 
-        {/* Unlocked relationships section */}
+        {/* Relationships section */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-[11px] font-bold text-[#a5b4fc] uppercase tracking-wider">
-              Unlocked Relations ({relationships.length})
+              Relationships ({relationships.length})
             </h3>
             <span className="text-[10px] text-slate-500">
-              Known at Ch. {chapter}
+              As of chapter {chapter}
             </span>
           </div>
 
           {relationships.length === 0 ? (
             <div className="p-4 bg-[#0b0f19]/70 rounded-xl ring-1 ring-white/5 text-center">
               <p className="text-xs text-slate-400">
-                No established bonds unlocked yet.
+                No relationships known at this chapter.
               </p>
             </div>
           ) : (
@@ -336,7 +336,7 @@ export default function FloatingPanel({
 
       {/* Footer hints */}
       <div className="px-4 py-2.5 bg-[#0b0f19]/80 border-t border-white/5 text-[10px] text-slate-500 flex items-center justify-between">
-        <span>Click relation to center character</span>
+        <span>Tap a relationship to focus that character</span>
         <span>
           <kbd className="px-1.5 py-0.5 rounded bg-white/5 ring-1 ring-white/10 font-mono text-[9px] text-slate-400">
             Esc
