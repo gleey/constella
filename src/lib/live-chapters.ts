@@ -48,7 +48,33 @@ function noteMangaUpdatesSuccess(): void {
   muConsecutiveFailures = 0;
 }
 
+/**
+ * MangaUpdates Acceptable Use Policy: "use reasonable spacing between requests
+ * so as not to overwhelm the MangaUpdates servers, and employ caching
+ * mechanisms when accessing data."
+ *
+ * Every call to the API goes through one serial queue with a minimum gap, so
+ * concurrent catalog syncs can never burst. Responses are cached (12 h) in the
+ * shared api-cache, so a re-sync of the same title costs zero requests.
+ */
+const MU_MIN_INTERVAL_MS = 1200;
+const MU_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+let muQueue: Promise<unknown> = Promise.resolve();
+let muLastRequestAt = 0;
+
 function requestIPv4(url: string, options: { method?: string; body?: string; headers?: Record<string, string> } = {}) {
+  const task = muQueue.then(async () => {
+    const gap = MU_MIN_INTERVAL_MS - (Date.now() - muLastRequestAt);
+    if (gap > 0) await new Promise((r) => setTimeout(r, gap));
+    muLastRequestAt = Date.now();
+    return requestIPv4Now(url, options);
+  });
+  // Keep the queue alive even when a request rejects.
+  muQueue = task.catch(() => undefined);
+  return task;
+}
+
+function requestIPv4Now(url: string, options: { method?: string; body?: string; headers?: Record<string, string> } = {}) {
   return new Promise<{ ok: boolean; status: number; json: () => Promise<any> }>((resolve, reject) => {
     const u = new URL(url);
     const req = https.request(
@@ -291,27 +317,29 @@ export async function fetchLiveMangaInfo(
     const uniqueForms = [...new Set(forms)];
 
     let bestRecord: any | null = null;
-    // Query all title forms concurrently, then evaluate in original form order
-    // so the exact/primary form keeps priority over looser synonyms.
-    const searchResponses = await Promise.all(
-      uniqueForms.map((form) =>
-        requestIPv4("https://api.mangaupdates.com/v1/series/search", {
+    // Title forms are queried one at a time through the spaced queue (AUP),
+    // in original form order so the exact/primary form keeps priority over
+    // looser synonyms. Each response is cached, so repeat syncs are free.
+    for (const form of uniqueForms) {
+      if (!mangaUpdatesAvailable()) break;
+
+      const cacheKey = `mu:search:${form.toLowerCase()}`;
+      let searchData = cacheGet<any>(cacheKey);
+      if (!searchData) {
+        const searchRes = await requestIPv4("https://api.mangaupdates.com/v1/series/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ search: form, stype: "title" }),
-        })
-      )
-    );
-
-    for (const searchRes of searchResponses) {
-      if (!searchRes.ok) {
-        // 502/504 means the upstream is down — that is an outage, not a miss.
-        noteMangaUpdatesFailure();
-        if (!mangaUpdatesAvailable()) break;
-        continue;
+        });
+        if (!searchRes.ok) {
+          // 502/504 means the upstream is down — that is an outage, not a miss.
+          noteMangaUpdatesFailure();
+          continue;
+        }
+        searchData = await searchRes.json();
+        cacheSet(cacheKey, searchData, MU_CACHE_TTL_MS);
       }
 
-      const searchData = await searchRes.json();
       const results = searchData?.results || [];
       if (!results.length) continue;
 
@@ -320,11 +348,21 @@ export async function fetchLiveMangaInfo(
     }
 
     if (bestRecord?.series_id) {
-      const detailRes = await requestIPv4(
-        `https://api.mangaupdates.com/v1/series/${bestRecord.series_id}`,
-      );
-      if (detailRes.ok) {
-        const detail = await detailRes.json();
+      const detailKey = `mu:series:${bestRecord.series_id}`;
+      let detail = cacheGet<any>(detailKey);
+      if (!detail) {
+        const detailRes = await requestIPv4(
+          `https://api.mangaupdates.com/v1/series/${bestRecord.series_id}`,
+        );
+        if (!detailRes.ok) {
+          noteMangaUpdatesFailure();
+          detail = null;
+        } else {
+          detail = await detailRes.json();
+          cacheSet(detailKey, detail, MU_CACHE_TTL_MS);
+        }
+      }
+      if (detail) {
         const chapters = parseChapterFromDetail(detail);
         const status = parseStatusFromDetail(detail) ?? kitsuStatus;
         noteMangaUpdatesSuccess();
@@ -335,7 +373,6 @@ export async function fetchLiveMangaInfo(
         liveMangaCache.set(cacheKey, { data, timestamp: Date.now() });
         return data;
       }
-      noteMangaUpdatesFailure();
     } else {
       // A search that returns no usable record is a miss, not an outage.
       noteMangaUpdatesSuccess();
