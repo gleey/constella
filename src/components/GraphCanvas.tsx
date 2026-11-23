@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import cytoscape, { type Core } from "cytoscape";
 import type { GraphResponse, GraphFaction, GraphNode } from "@/lib/types";
 import { relationCategory, relationCategoryColor } from "@/lib/relations";
+import { edgeBend } from "@/lib/edge-routing";
 
 interface Props {
   data: GraphResponse;
@@ -355,30 +356,11 @@ export default function GraphCanvas({
     }
 
     /**
-     * Per-edge bend for unbundled-bezier. Straight spokes are readable but they
-     * run straight through whatever sits between two characters, so every edge
-     * bows sideways. The bow grows with the edge length and is mirrored for
-     * the two directions of the same pair (A→B and B→A split apart), which
-     * stops parallel relations from collapsing onto one line.
+     * Bend only edges that cross another character node; clean relations stay
+     * straight. See src/lib/edge-routing.ts.
      */
-    const bendForEdge = (source: string, target: string): number => {
-      const a = posById.get(source);
-      const b = posById.get(target);
-      if (!a || !b) return 0;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const len = Math.hypot(dx, dy);
-      if (len < 1) return 0;
-      const mag = Math.max(30, Math.min(110, len * 0.22));
-      let h = 0;
-      const pairKey = [source, target].sort().join("|");
-      for (let i = 0; i < pairKey.length; i++) {
-        h = (h * 31 + pairKey.charCodeAt(i)) | 0;
-      }
-      const pairSign = (h & 1) === 0 ? 1 : -1;
-      const dirSign = source > target ? 1 : -1;
-      return pairSign * dirSign * mag;
-    };
+    const bendForEdge = (source: string, target: string): number =>
+      edgeBend(source, target, posById);
 
     for (const edge of data.edges) {
       if (!nodeIdSet.has(edge.source) || !nodeIdSet.has(edge.target)) continue;
