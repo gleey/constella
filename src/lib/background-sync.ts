@@ -19,6 +19,8 @@ import {
   resolveFandomWikiSubdomain,
   fetchCharacterImage,
   fetchFandomCategoryCharacters,
+  parseInfoboxRelations,
+  type WikiRelation,
 } from "./fandom";
 import { parseCharacterWikitext, type GeminiParsedCharacter, normalizeGeminiOutput, getGeminiModels } from "./gemini";
 import { resolveCharacterName } from "./name-resolution";
@@ -723,6 +725,62 @@ async function runLoreSync(targetAnilistId?: number) {
       }
       addLog(`[Lore Sync] ${media.title}: mengekstrak lore untuk ${pendingChars.length} karakter.`);
 
+      /**
+       * Write one character's relationships. A re-sync overwrites rather than
+       * stacks: any existing line of the same type on this unordered pair is
+       * removed first, then the freshly parsed line is written.
+       */
+      const saveRelationships = async (
+        sourceCharId: string,
+        relations: Array<{
+          targetName: string;
+          relationType: string;
+          validFrom?: number;
+          validUntil?: number | null;
+          isSensitive?: boolean;
+        }>,
+        introduced: number,
+      ): Promise<number> => {
+        let written = 0;
+        for (const r of relations) {
+          if (!r.targetName || !r.relationType) continue;
+          const targetCharId = resolveCharacterName(r.targetName, dbCharacters);
+          if (!targetCharId || targetCharId === sourceCharId) continue;
+
+          const vFrom = Math.max(1, r.validFrom || introduced);
+          const vUntil =
+            r.validUntil !== null && r.validUntil !== undefined && r.validUntil > vFrom
+              ? r.validUntil
+              : null;
+          try {
+            validateTemporalBounds(vFrom, vUntil);
+            await prisma.relationship.deleteMany({
+              where: {
+                mediaId: media.id,
+                relationType: r.relationType,
+                OR: [
+                  { sourceCharacterId: sourceCharId, targetCharacterId: targetCharId },
+                  { sourceCharacterId: targetCharId, targetCharacterId: sourceCharId },
+                ],
+              },
+            });
+            await prisma.relationship.create({
+              data: {
+                mediaId: media.id,
+                sourceCharacterId: sourceCharId,
+                targetCharacterId: targetCharId,
+                relationType: r.relationType,
+                validFrom: vFrom,
+                validUntil: vUntil,
+                isSensitive: Boolean(r.isSensitive),
+              },
+            });
+            written++;
+          } catch {}
+        }
+        return written;
+      };
+
       for (const dbChar of pendingChars) {
         globalState.currentCharacter = dbChar.name;
 
@@ -738,11 +796,12 @@ async function runLoreSync(targetAnilistId?: number) {
         }
 
         let parsed: GeminiParsedCharacter | null = null;
+        let wikiRes: { title: string; wikitext: string } | null = null;
 
         // Try Fandom wikitext → LLM parsing
         if (wikiSubdomain) {
           try {
-            const wikiRes = await fetchCharacterWikitextSmart(wikiSubdomain, dbChar.name, dbChar.aliases);
+            wikiRes = await fetchCharacterWikitextSmart(wikiSubdomain, dbChar.name, dbChar.aliases);
             if (wikiRes && wikiRes.wikitext.length > 400) {
               const cleaned = cleanWikitextForLLM(wikiRes.wikitext, 8000);
               parsed = await parseCharacterWikitext(cleaned, dbChar.name, media.chapterNumberingSource, media.totalChapters);
@@ -751,6 +810,13 @@ async function runLoreSync(targetAnilistId?: number) {
             // fallback
           }
         }
+
+        // Deterministic infobox relations — free (no tokens) and they name real
+        // relation types ("Father", "Spouse", "Enemy") between any two
+        // characters, not just the protagonist. When the wiki states them they
+        // replace the LLM's relationship guesses, so a pair is never written
+        // twice under two different types.
+        const infoboxRelations: WikiRelation[] = wikiRes ? parseInfoboxRelations(wikiRes.wikitext) : [];
 
         // Fallback source 2: Wikipedia / Kitsu text → same LLM parser.
         // Used when there is no Fandom wiki, or the wiki has no page for this
@@ -788,7 +854,15 @@ async function runLoreSync(targetAnilistId?: number) {
           }
         }
 
-        if (!parsed) continue;
+        if (!parsed) {
+          // No LLM parse, but the infobox still gave us real relations — write
+          // those rather than skipping the character entirely.
+          if (infoboxRelations.length > 0) {
+            const written = await saveRelationships(dbChar.id, infoboxRelations, dbChar.introducedAtChapter);
+            addLog(`${dbChar.name}: ${written} relasi infobox (tanpa parse LLM).`);
+          }
+          continue;
+        }
 
         // Save debut chapter
         const introduced = Math.min(Math.max(1, parsed.introducedAtChapter || 1), media.totalChapters);
@@ -840,41 +914,14 @@ async function runLoreSync(targetAnilistId?: number) {
         }
 
         // Save Relationships
-        if (parsed.relationships && parsed.relationships.length > 0) {
-          for (const r of parsed.relationships) {
-            if (!r.targetName || !r.relationType) continue;
-            const targetCharId = resolveCharacterName(r.targetName, dbCharacters);
-            if (!targetCharId || targetCharId === dbChar.id) continue;
-
-            const vFrom = Math.max(1, r.validFrom || introduced);
-            const vUntil = r.validUntil !== null && r.validUntil > vFrom ? r.validUntil : null;
-            try {
-              validateTemporalBounds(vFrom, vUntil);
-              // A re-sync overwrites rather than stacks: any existing line of
-              // the same type on this unordered pair is removed first, then
-              // the freshly parsed line is written.
-              await prisma.relationship.deleteMany({
-                where: {
-                  mediaId: media.id,
-                  relationType: r.relationType,
-                  OR: [
-                    { sourceCharacterId: dbChar.id, targetCharacterId: targetCharId },
-                    { sourceCharacterId: targetCharId, targetCharacterId: dbChar.id },
-                  ],
-                },
-              });
-              await prisma.relationship.create({
-                data: {
-                  mediaId: media.id,
-                  sourceCharacterId: dbChar.id,
-                  targetCharacterId: targetCharId,
-                  relationType: r.relationType,
-                  validFrom: vFrom,
-                  validUntil: vUntil,
-                  isSensitive: Boolean(r.isSensitive),
-                },
-              });
-            } catch {}
+        const relationsToSave =
+          infoboxRelations.length > 0
+            ? infoboxRelations.map((r) => ({ ...r, isSensitive: false }))
+            : (parsed.relationships ?? []);
+        if (relationsToSave.length > 0) {
+          const written = await saveRelationships(dbChar.id, relationsToSave, introduced);
+          if (written > 0 && infoboxRelations.length > 0) {
+            addLog(`${dbChar.name}: ${written} relasi infobox (${infoboxRelations.map((r) => r.relationType).filter((t, i, a) => a.indexOf(t) === i).join(", ")}).`);
           }
         }
 

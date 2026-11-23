@@ -2215,6 +2215,146 @@ export function parseDebutFromWikitext(wikitext: string): number | null {
   return best;
 }
 
+// ---------------------------------------------------------------------------
+// Deterministic infobox relation parsing (no LLM, no tokens)
+// ---------------------------------------------------------------------------
+
+/**
+ * Infobox fields that name other characters, with the relation type the field
+ * implies when the value itself carries no descriptor.
+ * e.g. `|relatives = [[Giselle]]` → Relative, `|spouse = [[Ezra]]` → Spouse.
+ */
+const RELATION_FIELDS: Record<string, string> = {
+  relatives: "Relative",
+  relative: "Relative",
+  family: "Relative",
+  spouse: "Spouse",
+  husband: "Husband",
+  wife: "Wife",
+  friends: "Friend",
+  friend: "Friend",
+  allies: "Ally",
+  ally: "Ally",
+  enemies: "Enemy",
+  enemy: "Enemy",
+  rivals: "Rival",
+  rival: "Rival",
+  lover: "Love Interest",
+  partner: "Partner",
+  master: "Master",
+  disciple: "Disciple",
+  teacher: "Teacher",
+  student: "Student",
+};
+
+/** Descriptor words that refine the field default ("[[X]] (father)" → Father). */
+const RELATION_DESCRIPTORS: Record<string, string> = {
+  father: "Father",
+  mother: "Mother",
+  parent: "Parent",
+  son: "Son",
+  daughter: "Daughter",
+  brother: "Brother",
+  sister: "Sister",
+  sibling: "Sibling",
+  twin: "Twin",
+  cousin: "Cousin",
+  uncle: "Uncle",
+  aunt: "Aunt",
+  nephew: "Nephew",
+  niece: "Niece",
+  grandfather: "Grandfather",
+  grandmother: "Grandmother",
+  husband: "Husband",
+  wife: "Wife",
+  spouse: "Spouse",
+  fiance: "Fiancé",
+  fiancee: "Fiancée",
+  boyfriend: "Boyfriend",
+  girlfriend: "Girlfriend",
+  friend: "Friend",
+  "best friend": "Best Friend",
+  ally: "Ally",
+  companion: "Companion",
+  enemy: "Enemy",
+  rival: "Rival",
+  nemesis: "Nemesis",
+  master: "Master",
+  disciple: "Disciple",
+  student: "Student",
+  teacher: "Teacher",
+  sensei: "Teacher",
+};
+
+export interface WikiRelation {
+  targetName: string;
+  relationType: string;
+}
+
+function stripMarkup(s: string): string {
+  return s
+    .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, "$1")
+    .replace(/<\/?[a-z][^>]*>/gi, "")
+    .replace(/\[https?:\/\/\S+\s+([^\]]+)\]/gi, "$1")
+    .replace(/'/g, "")
+    .trim();
+}
+
+/**
+ * Parse character-to-character relations straight from a Fandom infobox.
+ * Deterministic and free: no LLM call. Only `[[wikilink]]` targets are taken,
+ * so plain prose is ignored — a link means the wiki has a page for that
+ * character, which is exactly the signal needed to resolve a node.
+ */
+export function parseInfoboxRelations(wikitext: string): WikiRelation[] {
+  const out: WikiRelation[] = [];
+  const seen = new Set<string>();
+
+  for (const rawLine of wikitext.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith("|")) continue;
+    const eq = line.indexOf("=");
+    if (eq === -1) continue;
+
+    const key = line.slice(1, eq).trim().toLowerCase().replace(/[\s_-]+/g, "_");
+    const defaultType = RELATION_FIELDS[key];
+    if (!defaultType) continue;
+
+    const value = line.slice(eq + 1);
+    // Multiple targets in one field are separated by <br>, semicolons or
+    // newlines; split before extracting links so per-target descriptors work.
+    const entries = value.split(/<br\s*\/?>|;\s|<\/p>/i);
+
+    for (const entry of entries) {
+      const links = [...entry.matchAll(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g)].map((m) =>
+        m[1].trim()
+      );
+      if (links.length === 0) continue;
+
+      const descriptorText = stripMarkup(entry).replace(/\s+/g, " ");
+      let descriptor: string | null = null;
+      const lowered = descriptorText.toLowerCase();
+      for (const [word, label] of Object.entries(RELATION_DESCRIPTORS)) {
+        if (new RegExp(`\\b${word}\\b`, "i").test(lowered)) {
+          descriptor = label;
+          break;
+        }
+      }
+
+      for (const target of links) {
+        const clean = target.replace(/\(.*?\)/, "").trim();
+        if (!clean) continue;
+        const dedupeKey = `${clean.toLowerCase()}|${descriptor ?? defaultType}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        out.push({ targetName: clean, relationType: descriptor ?? defaultType });
+      }
+    }
+  }
+
+  return out;
+}
+
 /**
  * Look up a character's real debut chapter from its Fandom infobox.
  * Tries the canonical name then aliases; returns null when no page states one.

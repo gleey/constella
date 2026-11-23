@@ -14,14 +14,13 @@ export const RELATION_CATEGORIES: {
   label: string;
   color: string;
 }[] = [
-  { id: "family", label: "Family", color: "#f472b6" },
-  { id: "friend", label: "Friend / Ally", color: "#34d399" },
+  { id: "family", label: "Family", color: "#f472b6" },  { id: "friend", label: "Friend / Ally", color: "#34d399" },
   { id: "enemy", label: "Enemy / Rival", color: "#f87171" },
   { id: "other", label: "Other", color: "#818cf8" },
 ];
 
 const FAMILY =
-  /\b(father|mother|parent|son|daughter|child|brother|sister|sibling|husband|wife|spouse|family|cousin|uncle|aunt|nephew|niece|grandfather|grandmother|grandpa|grandma|adoptive|adopted|step-?(father|mother|brother|sister|son|daughter|child)|in-?law|twin|kin|ancestor|descendant)\b/i;
+  /\b(father|mother|parent|son|daughter|child|brother|sister|sibling|husband|wife|spouse|family|cousin|uncle|aunt|nephew|niece|grandfather|grandmother|grandpa|grandma|adoptive|adopted|step-?(father|mother|brother|sister|son|daughter|child)|in-?law|twin|kin|relative|ancestor|descendant)\b/i;
 
 const ENEMY =
   /\b(enemy|enemies|rival|rivalry|nemesis|foe|opponent|antagonist|villain|adversary|hostile|hatred|hate|killer|murderer|assassin|target|bully|tormentor|captor|kidnapper)\b/i;
