@@ -371,6 +371,8 @@ export default function GraphCanvas({
     }
 
     let cy: Core;
+    let refitFrame = 0;
+    let observer: ResizeObserver | null = null;
     try {
       cy = cytoscape({
         container,
@@ -536,6 +538,17 @@ export default function GraphCanvas({
     // ── 5. Fit & center pada protagonist ──────────────────────────────────
     fitGraph(cy, mainCharId);
 
+    // Refit when the viewport changes (phone rotation, browser chrome, panel
+    // open/close) so the graph never stays clipped at a stale zoom level.
+    observer = new ResizeObserver(() => {
+      cancelAnimationFrame(refitFrame);
+      refitFrame = requestAnimationFrame(() => {
+        cy.resize();
+        fitGraph(cy, mainCharId);
+      });
+    });
+    observer.observe(container);
+
     // ── 6. Events ────────────────────────────────────────────────────────
     cy.on("tap", "node[?isCharacter]", (evt) => {
       onNodeClickRef.current(evt.target.id());
@@ -550,6 +563,8 @@ export default function GraphCanvas({
     }
 
     return () => {
+      cancelAnimationFrame(refitFrame);
+      observer?.disconnect();
       if (cyRef.current) {
         cyRef.current.destroy();
         cyRef.current = null;
@@ -565,7 +580,7 @@ export default function GraphCanvas({
   };
 
   return (
-    <div className="relative w-full h-full min-h-[550px] overflow-hidden rounded-2xl border border-[#1e293b] bg-[#090d16] shadow-2xl">
+    <div className="relative w-full h-full min-h-[320px] sm:min-h-[550px] overflow-hidden rounded-2xl border border-[#1e293b] bg-[#090d16] shadow-2xl">
       {/* Cytoscape DOM container */}
       <div
         ref={containerRef}

@@ -53,7 +53,7 @@ export default function FloatingPanel({
     .filter((r) => r.partner !== undefined);
 
   return (
-    <div className="absolute top-4 right-4 z-40 w-96 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-6rem)] bg-[#0d1322]/95 backdrop-blur-2xl ring-1 ring-white/10 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col animate-slide-in-right text-slate-200">
+    <div className="fixed inset-x-0 bottom-0 sm:absolute sm:inset-x-auto sm:bottom-auto sm:top-4 sm:right-4 z-40 w-full sm:w-96 sm:max-w-[calc(100vw-2rem)] max-h-[70dvh] sm:max-h-[calc(100vh-6rem)] bg-[#0d1322]/95 backdrop-blur-2xl ring-1 ring-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col animate-fade-in sm:animate-slide-in-right text-slate-200 pb-[env(safe-area-inset-bottom)] sm:pb-0">
       {/* Faction accent bar */}
       <div
         className="h-0.5 w-full shrink-0"
@@ -337,7 +337,7 @@ export default function FloatingPanel({
       {/* Footer hints */}
       <div className="px-4 py-2.5 bg-[#0b0f19]/80 border-t border-white/5 text-[10px] text-slate-500 flex items-center justify-between">
         <span>Tap a relationship to focus that character</span>
-        <span>
+        <span className="hidden sm:inline">
           <kbd className="px-1.5 py-0.5 rounded bg-white/5 ring-1 ring-white/10 font-mono text-[9px] text-slate-400">
             Esc
           </kbd>{" "}

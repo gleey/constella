@@ -76,10 +76,10 @@ export default function ChapterSlider({
     totalChapters > 1 ? ((shownChapter - 1) / (totalChapters - 1)) * 100 : 0;
 
   const navBtn =
-    "w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 hover:bg-white/10 ring-1 ring-white/10 hover:ring-indigo-500/50 disabled:opacity-40 disabled:pointer-events-none text-slate-300 hover:text-white transition-colors cursor-pointer";
+    "w-7 h-7 sm:w-8 sm:h-8 shrink-0 rounded-lg flex items-center justify-center bg-white/5 hover:bg-white/10 ring-1 ring-white/10 hover:ring-indigo-500/50 disabled:opacity-40 disabled:pointer-events-none text-slate-300 hover:text-white transition-colors cursor-pointer";
 
   return (
-    <div className="flex items-center gap-2.5 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 rounded-full px-3 py-1.5 shadow-lg shadow-black/30">
+    <div className="flex items-center gap-2 sm:gap-2.5 w-full sm:w-auto bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 rounded-full px-2.5 sm:px-3 py-1.5 shadow-lg shadow-black/30">
       {/* Prev button */}
       <button
         onClick={() => onChange(clamp(currentChapter - 1))}
@@ -94,7 +94,7 @@ export default function ChapterSlider({
       </button>
 
       {/* Slider + counter */}
-      <div className="flex items-center gap-2.5 min-w-[180px] sm:min-w-[240px]">
+      <div className="flex items-center gap-2 sm:gap-2.5 flex-1 min-w-0 sm:flex-none sm:min-w-[240px]">
         <input
           id="chapter-slider"
           type="range"
@@ -113,7 +113,7 @@ export default function ChapterSlider({
           }}
           aria-label="Chapter"
         />
-        <span className="text-xs font-mono font-bold text-white bg-white/5 ring-1 ring-white/10 rounded-md px-2 py-0.5 min-w-[7ch] text-center">
+        <span className="text-[11px] sm:text-xs font-mono font-bold text-white bg-white/5 ring-1 ring-white/10 rounded-md px-1.5 sm:px-2 py-0.5 min-w-[6ch] text-center shrink-0">
           {shownChapter}/{totalChapters}
         </span>
       </div>
@@ -132,7 +132,7 @@ export default function ChapterSlider({
       </button>
 
       {/* Quick jump */}
-      <div className="border-l border-white/10 pl-2.5">
+      <div className="border-l border-white/10 pl-2 sm:pl-2.5 shrink-0">
         {showJump ? (
           <form onSubmit={handleJumpSubmit} className="flex items-center gap-1">
             <input

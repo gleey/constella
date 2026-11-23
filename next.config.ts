@@ -13,6 +13,9 @@ import type { NextConfig } from "next";
 const adminPath = (process.env.ADMIN_PATH || "").trim().replace(/^\/+|\/+$/g, "");
 
 const nextConfig: NextConfig = {
+  // Hide the dev-only route indicator: it overlaps the graph controls and has
+  // no value for remote testing. Compile/runtime errors are still surfaced.
+  devIndicators: false,
   async rewrites() {
     if (!adminPath || adminPath === "admin") return [];
     return [

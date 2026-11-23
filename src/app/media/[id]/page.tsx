@@ -21,6 +21,7 @@ interface MediaHeader {
 
 /** Plain-language labels for the internal chapter-numbering codes. */
 const NUMBERING_LABELS: Record<string, string> = {
+  anilist: "AniList",
   official_en: "Official English",
   raw_kr: "Raw Korean",
   raw_jp: "Raw Japanese",
@@ -113,11 +114,13 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
   };
 
   return (
-    <div className="relative w-full h-[calc(100vh-4rem)] bg-[#0b0f19] overflow-hidden flex flex-col">
-      {/* Top header / control bar */}
-      <header className="h-16 border-b border-white/5 bg-[#0b0f19]/80 backdrop-blur-xl px-4 flex items-center justify-between gap-4 shrink-0 z-30">
+    <div className="relative w-full h-[calc(100dvh-3.5rem)] sm:h-[calc(100vh-4rem)] bg-[#0b0f19] overflow-hidden flex flex-col">
+      {/* Top header / control bar.
+          Mobile: baris 1 = judul + pencarian, baris 2 = slider selebar layar.
+          Desktop: satu baris, slider di tengah. */}
+      <header className="border-b border-white/5 bg-[#0b0f19]/80 backdrop-blur-xl px-3 sm:px-4 py-2 sm:py-0 sm:h-16 grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:gap-4 shrink-0 z-30">
         {/* Left: back & media info */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="col-start-1 row-start-1 flex items-center gap-2 sm:gap-3 min-w-0">
           <Link
             href="/#catalog"
             className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 ring-1 ring-white/10 hover:ring-indigo-500/50 flex items-center justify-center text-slate-300 hover:text-white transition-colors shrink-0"
@@ -157,8 +160,8 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
 
-        {/* Center: chapter slider */}
-        <div className="flex items-center gap-2">
+        {/* Chapter slider */}
+        <div className="col-span-2 col-start-1 row-start-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 justify-self-stretch sm:justify-self-center flex items-center gap-2 min-w-0">
           {media && (
             <ChapterSlider
               currentChapter={chapter}
@@ -169,8 +172,8 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
 
-        {/* Right: character search */}
-        <div className="flex items-center gap-2">
+        {/* Character search */}
+        <div className="col-start-2 row-start-1 sm:col-start-3 justify-self-end flex items-center gap-2">
           {data && (
             <CharacterSearch
               nodes={data.nodes}

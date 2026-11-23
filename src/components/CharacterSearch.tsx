@@ -101,7 +101,7 @@ export default function CharacterSearch({
   };
 
   return (
-    <div ref={containerRef} className="relative w-48 sm:w-64 md:w-80 lg:w-96">
+    <div ref={containerRef} className="relative w-36 sm:w-64 md:w-80 lg:w-96">
       {/* Search Input Box with clear outline & prominence */}
       <div
         className={`relative flex items-center w-full h-10 px-3 rounded-xl bg-[#0f172a]/95 border-2 transition-all duration-200 shadow-md ${
