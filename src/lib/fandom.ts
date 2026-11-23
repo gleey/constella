@@ -2289,6 +2289,7 @@ const RELATION_DESCRIPTORS: Record<string, string> = {
 export interface WikiRelation {
   targetName: string;
   relationType: string;
+  isSensitive: boolean;
 }
 
 function stripMarkup(s: string): string {
@@ -2347,7 +2348,7 @@ export function parseInfoboxRelations(wikitext: string): WikiRelation[] {
         const dedupeKey = `${clean.toLowerCase()}|${descriptor ?? defaultType}`;
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
-        out.push({ targetName: clean, relationType: descriptor ?? defaultType });
+        out.push({ targetName: clean, relationType: descriptor ?? defaultType, isSensitive: false });
       }
     }
   }

@@ -18,25 +18,20 @@ const sample = `{{Infobox character
 Shuri is close to [[Someone]] and hates [[Other]].
 `;
 
-const rels = parseInfoboxRelations(sample);
-const find = (t: string) => rels.filter((r) => r.targetName === t);
+const pairs = (rels: { targetName: string; relationType: string }[]) =>
+  rels.map((r) => `${r.targetName}:${r.relationType}`).sort();
 
+const rels = parseInfoboxRelations(sample);
 assert.deepEqual(
-  rels.map((r) => `${r.targetName}:${r.relationType}`).sort(),
-  [
-    "Ezra:Spouse",
-    "Jeremy Nürnberger:Brother",
-    "Kaiser:Enemy",
-    "Lina:Friend",
-    "Norra:Sister",
-  ].sort(),
+  pairs(rels),
+  ["Ezra:Spouse", "Jeremy Nürnberger:Brother", "Kaiser:Enemy", "Lina:Friend", "Norra:Sister"].sort(),
 );
 
 // Field default used when no descriptor is present.
-assert.deepEqual(parseInfoboxRelations("| relatives = [[A]]\n"), [{ targetName: "A", relationType: "Relative" }]);
+assert.deepEqual(pairs(parseInfoboxRelations("| relatives = [[A]]\n")), ["A:Relative"]);
 
 // Piped links resolve to the display title.
-assert.deepEqual(parseInfoboxRelations("| friends = [[A|B]]\n"), [{ targetName: "B", relationType: "Friend" }]);
+assert.deepEqual(pairs(parseInfoboxRelations("| friends = [[A|B]]\n")), ["B:Friend"]);
 
 // Plain prose without wikilinks is ignored.
 assert.deepEqual(parseInfoboxRelations("| friends = Some unnamed guy\n"), []);
@@ -45,13 +40,13 @@ assert.deepEqual(parseInfoboxRelations("| friends = Some unnamed guy\n"), []);
 assert.deepEqual(parseInfoboxRelations("| debut = Chapter 3\n| age = 20\n| affiliation = [[House X]]\n"), []);
 
 // Duplicate targets with the same type collapse; different types both kept.
-{
-  const dupes = parseInfoboxRelations("| friends = [[A]]\n| allies = [[A]]\n");
-  assert.equal(dupes.length, 2);
-}
+assert.equal(parseInfoboxRelations("| friends = [[A]]\n| allies = [[A]]\n").length, 2);
 
 // Case-insensitive field names and spacing variants.
-assert.deepEqual(parseInfoboxRelations("| Relatives = [[A]]\n"), [{ targetName: "A", relationType: "Relative" }]);
-assert.deepEqual(parseInfoboxRelations("|relatives=[[A]]\n"), [{ targetName: "A", relationType: "Relative" }]);
+assert.deepEqual(pairs(parseInfoboxRelations("| Relatives = [[A]]\n")), ["A:Relative"]);
+assert.deepEqual(pairs(parseInfoboxRelations("|relatives=[[A]]\n")), ["A:Relative"]);
+
+// Infobox relations are marked non-sensitive: the wiki states them openly.
+assert.equal(parseInfoboxRelations("| friends = [[A]]\n")[0].isSensitive, false);
 
 console.log(`wiki-relations: ${rels.length} relations parsed, all checks passed`);

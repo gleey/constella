@@ -23,9 +23,10 @@ import {
   type WikiRelation,
 } from "./fandom";
 import { parseCharacterWikitext, type GeminiParsedCharacter, normalizeGeminiOutput, getGeminiModels } from "./gemini";
-import { resolveCharacterName } from "./name-resolution";
+import { resolveCharacterName, resolveNames } from "./name-resolution";
 import { fetchAltCharacterText, fetchAltCharacterRoster } from "./alt-sources";
 import { normalizeName, shouldMergeCharacters, canonicalizeName } from "./name-dedupe";
+import { saveMediaRelations } from "./media-relations";
 import { validateTemporalBounds } from "./temporal";
 import { resolveTotalChapters } from "./chapter-count";
 import { isBrokenImageUrl } from "./auto-sync";
@@ -188,6 +189,9 @@ async function runCatalogSync(targetAnilistId?: number) {
           genres: anilistDetail.genres,
         },
       });
+
+      // Series links (prequel/sequel) refreshed on every catalog run.
+      await saveMediaRelations(media.id, anilistDetail.relations);
 
       // Resolve Fandom Wiki fresh on every sync. Wiki resolution can improve
       // (new disambiguation rules, wikis being created/moved), so the result
@@ -666,13 +670,29 @@ REQUIREMENTS:
  * Parses Fandom wikitext via Gemini/Groq for descriptions, relationships, statuses, factions.
  * CONSUMES AI TOKENS — only triggered manually via API.
  */
-async function runLoreSync(targetAnilistId?: number) {
+async function runLoreSync(targetAnilistId?: number, batch?: number) {
   let mediaList: Array<{ id: string; anilistId: number; title: string; totalChapters: number; chapterNumberingSource: string; type: string }>;
 
   if (targetAnilistId) {
     const m = await prisma.media.findFirst({ where: { anilistId: targetAnilistId } });
     if (!m) throw new Error(`Media AniList ID ${targetAnilistId} tidak ditemukan di database`);
     mediaList = [m];
+  } else if (batch && batch > 0) {
+    // Automatic cycles take a small, token-bounded slice: series whose
+    // characters have no approved lore draft yet. The slice rotates as drafts
+    // get approved, so a weekly cycle spreads the AI spend instead of burning
+    // the whole catalog at once.
+    const approved = await prisma.draftIngestion.findMany({
+      where: { status: "APPROVED" },
+      select: { mediaId: true },
+    });
+    const approvedIds = new Set(approved.map((d) => d.mediaId));
+    const pending = await prisma.media.findMany({
+      where: { characters: { some: {} } },
+      orderBy: { title: "asc" },
+    });
+    mediaList = pending.filter((m) => !approvedIds.has(m.id)).slice(0, batch);
+    addLog(`[Lore Sync] Batch otomatis: ${mediaList.length} seri dipilih dari ${pending.length} seri tanpa lore.`);
   } else {
     mediaList = await prisma.media.findMany();
   }
@@ -781,6 +801,44 @@ async function runLoreSync(targetAnilistId?: number) {
         return written;
       };
 
+      /**
+       * Review mode: park the AI parse in DraftIngestion instead of writing to
+       * the active tables. An admin approves/rejects it from the dashboard, so
+       * lore never goes live on the strength of the model alone.
+       */
+      const upsertLoreDraft = async (
+        dbChar: { id: string; name: string },
+        parsed: GeminiParsedCharacter,
+        rawWikitext: string | null,
+      ): Promise<void> => {
+        const factions = await prisma.faction.findMany({
+          where: { mediaId: media.id },
+          select: { id: true, name: true },
+        });
+        const { unresolvedNames } = resolveNames(parsed, dbCharacters, factions);
+        const status = unresolvedNames.length > 0 ? "UNRESOLVED" : "PENDING";
+        const existing = await prisma.draftIngestion.findFirst({
+          where: {
+            mediaId: media.id,
+            characterName: dbChar.name,
+            status: { in: ["APPROVED", "PENDING", "UNRESOLVED"] },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        if (existing?.status === "APPROVED") {
+          addLog(`${dbChar.name}: draft sudah APPROVED — dilewati.`);
+          return;
+        }
+        const data = { rawWikitext, parsedJson: parsed as object, status, unresolvedNames };
+        if (existing) {
+          await prisma.draftIngestion.update({ where: { id: existing.id }, data });
+        } else {
+          await prisma.draftIngestion.create({
+            data: { mediaId: media.id, characterName: dbChar.name, ...data },
+          });
+        }
+      };
+
       for (const dbChar of pendingChars) {
         globalState.currentCharacter = dbChar.name;
 
@@ -854,6 +912,30 @@ async function runLoreSync(targetAnilistId?: number) {
           }
         }
 
+        const introduced = parsed
+          ? Math.min(Math.max(1, parsed.introducedAtChapter || 1), media.totalChapters)
+          : dbChar.introducedAtChapter;
+
+        // Review mode: AI output goes to the admin queue, not to the live graph.
+        // Deterministic infobox relations are free and reliable, so when there is
+        // no AI parse they still go straight to the graph below.
+        if (process.env.LORE_SYNC_REVIEW === "true" && parsed) {
+          const draftParsed: GeminiParsedCharacter = { ...parsed };
+          if (infoboxRelations.length > 0) {
+            draftParsed.relationships = infoboxRelations.map((r) => ({
+              targetName: r.targetName,
+              relationType: r.relationType,
+              validFrom: introduced,
+              validUntil: null,
+              isSensitive: r.isSensitive,
+            }));
+          }
+          await upsertLoreDraft(dbChar, draftParsed, wikiRes?.wikitext ?? null);
+          addLog(`Lore ${dbChar.name} masuk antrian review (${draftParsed.relationships.length} relasi).`);
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+
         if (!parsed) {
           // No LLM parse, but the infobox still gave us real relations — write
           // those rather than skipping the character entirely.
@@ -865,7 +947,6 @@ async function runLoreSync(targetAnilistId?: number) {
         }
 
         // Save debut chapter
-        const introduced = Math.min(Math.max(1, parsed.introducedAtChapter || 1), media.totalChapters);
         await prisma.character.update({
           where: { id: dbChar.id },
           data: { introducedAtChapter: introduced },
@@ -996,7 +1077,10 @@ export function startCatalogSync(targetAnilistId?: number): { started: boolean; 
  * Start Tier 2 lore sync (AI-powered — CONSUMES TOKENS).
  * Only triggered manually via API. Not run by background daemon.
  */
-export function startLoreSync(targetAnilistId?: number): { started: boolean; message: string } {
+export function startLoreSync(
+  targetAnilistId?: number,
+  opts?: { batch?: number },
+): { started: boolean; message: string; batch?: number; reviewMode?: boolean } {
   if (globalState.isRunning) {
     return {
       started: false,
@@ -1013,7 +1097,7 @@ export function startLoreSync(targetAnilistId?: number): { started: boolean; mes
   globalState.lastError = null;
 
   setImmediate(() => {
-    runLoreSync(targetAnilistId)
+    runLoreSync(targetAnilistId, opts?.batch)
       .then(() => finishSync())
       .catch((err) => {
         console.error("Lore sync fatal error:", err);
@@ -1022,7 +1106,7 @@ export function startLoreSync(targetAnilistId?: number): { started: boolean; mes
       });
   });
 
-  return { started: true, message: "Lore sync dimulai (AI-powered, memakan token)." };
+    return { started: true, message: "Lore sync dimulai (AI-powered, memakan token).", batch: opts?.batch, reviewMode: process.env.LORE_SYNC_REVIEW === "true" };
 }
 
 /** @deprecated Use startCatalogSync instead. Kept for backward compatibility. */
@@ -1047,8 +1131,18 @@ export function initBackgroundDaemon(intervalHours = 6) {
 
   const autoLoreSync = process.env.ENABLE_AUTO_LORE_SYNC === "true";
   const loreIntervalHours = parseInt(process.env.LORE_SYNC_INTERVAL_HOURS || "168", 10);
+  // Token-bounded automatic cycles: 0 = no batch limit (full run).
+  const loreBatch = parseInt(process.env.LORE_SYNC_BATCH || "0", 10);
+  const loreReview = process.env.LORE_SYNC_REVIEW === "true";
 
-  addLog(`Background daemon aktif (catalog interval: ${intervalHours} jam). Tier 1 tanpa AI.${autoLoreSync ? ` Lore sync otomatis AKTIF setiap ${loreIntervalHours} jam (MEMAKAN TOKEN AI).` : " Lore sync manual (via admin panel)."}`);
+  addLog(
+    `Background daemon aktif (catalog interval: ${intervalHours} jam). Tier 1 tanpa AI.` +
+      (autoLoreSync
+        ? ` Lore sync otomatis AKTIF setiap ${loreIntervalHours} jam` +
+          ` (batch ${loreBatch > 0 ? `${loreBatch} seri` : "semua seri"},` +
+          ` ${loreReview ? "masuk antrian review" : "langsung terbit"}; MEMAKAN TOKEN AI).`
+        : " Lore sync manual (via admin panel)."),
+  );
 
   // Defer initial catalog run by 8 seconds
   setTimeout(() => {
@@ -1068,18 +1162,21 @@ export function initBackgroundDaemon(intervalHours = 6) {
 
   // Periodic lore sync interval (Tier 2 — AI tokens, opt-in only)
   if (autoLoreSync) {
-    // Defer initial lore sync by 30 seconds (after first catalog sync starts)
-    setTimeout(() => {
-      if (!globalState.isRunning) {
-        addLog("Menjalankan lore sync otomatis awal (AI-powered)...");
-        startLoreSync();
+    // The first catalog sync runs for a long time, so wait for an idle window
+    // instead of firing lore sync 30s in and silently skipping it.
+    const runLoreWhenIdle = () => {
+      if (globalState.isRunning) {
+        setTimeout(runLoreWhenIdle, 60_000);
+        return;
       }
-    }, 30000);
+      startLoreSync(undefined, { batch: loreBatch });
+    };
+    setTimeout(runLoreWhenIdle, 30_000);
 
     setInterval(() => {
       if (!globalState.isRunning) {
         addLog(`Menjalankan lore sync otomatis berkala (${loreIntervalHours} jam, AI-powered)...`);
-        startLoreSync();
+        startLoreSync(undefined, { batch: loreBatch });
       }
     }, loreIntervalHours * 60 * 60 * 1000);
   }
