@@ -316,7 +316,7 @@ async function runCatalogSync(targetAnilistId?: number) {
       // AniList romanization variants like "Dok-Ja Kim" duplicating "Kim Dokja").
       const dbChars = await prisma.character.findMany({
         where: { mediaId: media.id },
-        select: { id: true, name: true, aliases: true, imageUrl: true, introducedAtChapter: true },
+        select: { id: true, name: true, aliases: true, imageUrl: true, introducedAtChapter: true, debutKnown: true },
       });
 
       // Resolve broken/missing portraits in parallel BEFORE the DB loop so the
@@ -371,7 +371,11 @@ async function runCatalogSync(targetAnilistId?: number) {
           if (c.name !== existing.name) aliasSet.add(c.name);
           const nextAliases = Array.from(aliasSet).filter((a) => a !== existing.name);
           const nextImage = finalImage || existing.imageUrl;
-          const nextIntro = Math.max(1, Math.min(estimatedIntro, totalChapters));
+          // Jangan timpa chapter debut yang sudah terverifikasi (lore/wiki) dengan
+          // estimasi role-based — estimasi hanya untuk yang debutKnown = false.
+          const nextIntro = existing.debutKnown
+            ? existing.introducedAtChapter
+            : Math.max(1, Math.min(estimatedIntro, totalChapters));
           if (
             nextImage !== existing.imageUrl ||
             nextAliases.length !== existing.aliases.length ||
@@ -397,6 +401,7 @@ async function runCatalogSync(targetAnilistId?: number) {
               aliases: c.aliases,
               imageUrl: finalImage || "",
               introducedAtChapter: estimatedIntro,
+              isProtagonist: c.name === (mainChars[0]?.name ?? ""),
             },
           });
           dbChars.push({
@@ -405,6 +410,7 @@ async function runCatalogSync(targetAnilistId?: number) {
             aliases: created.aliases,
             imageUrl: created.imageUrl,
             introducedAtChapter: created.introducedAtChapter,
+            debutKnown: created.debutKnown,
           });
         }
       }

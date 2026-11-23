@@ -59,10 +59,41 @@ export async function GET(
   // ── Layer 1: Characters visible at chapter N ─────────────────────────
   const characters = await prisma.character.findMany({
     where: { mediaId, ...characterVisibleAt(chapter) },
-    select: { id: true, name: true, imageUrl: true, introducedAtChapter: true },
+    select: {
+      id: true,
+      name: true,
+      imageUrl: true,
+      introducedAtChapter: true,
+      debutKnown: true,
+      isProtagonist: true,
+    },
   });
 
   const characterIds = new Set(characters.map((c) => c.id));
+
+  // ── Protagonist: stable for the whole series, never re-derived per chapter ─
+  // A per-chapter "most connected visible node" made the MC flip as the slider
+  // moved (A Stepmother's Märchen: Jeremy at ch1, Shuri at ch2, someone else at
+  // ch100). Degree is therefore counted over ALL relationships of the series,
+  // and an explicit isProtagonist flag (set from AniList's MAIN role) wins.
+  const allRelationships = await prisma.relationship.findMany({
+    where: { mediaId },
+    select: { sourceCharacterId: true, targetCharacterId: true },
+  });
+  const degree = new Map<string, number>();
+  for (const r of allRelationships) {
+    degree.set(r.sourceCharacterId, (degree.get(r.sourceCharacterId) || 0) + 1);
+    degree.set(r.targetCharacterId, (degree.get(r.targetCharacterId) || 0) + 1);
+  }
+  const protagonist =
+    characters.find((c) => c.isProtagonist) ??
+    [...characters].sort(
+      (a, b) =>
+        (degree.get(b.id) || 0) - (degree.get(a.id) || 0) ||
+        a.introducedAtChapter - b.introducedAtChapter ||
+        a.name.localeCompare(b.name),
+    )[0] ??
+    null;
 
   // ── Descriptions: deterministic pick per character ───────────────────
   // Fetch all matching, group by characterId, take first per ordering.
@@ -131,10 +162,11 @@ export async function GET(
       name: c.name,
       imageUrl: c.imageUrl,
       debutChapter: c.introducedAtChapter,
+      debutKnown: c.debutKnown,
+      isProtagonist: c.isProtagonist,
       status,
       description,
       factions,
-      hasLore: Boolean(description || status || factions.length > 0),
     };
   });
 
@@ -190,5 +222,6 @@ export async function GET(
     factions,
     nodes,
     edges,
+    protagonistId: protagonist?.id ?? null,
   });
 }

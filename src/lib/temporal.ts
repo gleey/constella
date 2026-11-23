@@ -75,10 +75,15 @@ export const temporalOrderBy = [
 
 /**
  * Filter a character by introducedAtChapter.
- * Character is visible only if introducedAtChapter <= N.
+ * A character is visible at chapter N when:
+ *   - its debut is verified and introducedAtChapter <= N, OR
+ *   - its debut is NOT verified (debutKnown = false) — we have no chapter to
+ *     hide it behind, so it is always visible and marked as unknown in the UI.
  */
 export function characterVisibleAt(chapter: number) {
-  return { introducedAtChapter: { lte: chapter } };
+  return {
+    OR: [{ introducedAtChapter: { lte: chapter } }, { debutKnown: false }],
+  };
 }
 
 /**

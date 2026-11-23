@@ -159,13 +159,13 @@ function assertNoForbiddenKeys(obj: unknown, path: string): void {
 
 // ── Raw DB records for cross-validation ─────────────────────────────────
 
-interface RawCharacter { id: string; introducedAtChapter: number }
+interface RawCharacter { id: string; introducedAtChapter: number; debutKnown: boolean }
 interface RawTemporal { validFrom: number; validUntil: number | null; characterId?: string }
 
 async function getRawData(mediaId: string) {
   const characters = await prisma.character.findMany({
     where: { mediaId },
-    select: { id: true, introducedAtChapter: true },
+    select: { id: true, introducedAtChapter: true, debutKnown: true },
   });
   const descriptions = await prisma.characterDescription.findMany({
     where: { characterId: { in: characters.map(c => c.id) } },
@@ -223,9 +223,13 @@ async function runTests() {
     try {
       const graph = await buildGraph(media.id, N);
 
-      // No character with introducedAtChapter > N
+      // No character with a VERIFIED debut after N. Unverified debuts
+      // (debutKnown = false) are always visible by design — the UI shows them
+      // in a "Debut unknown" box rather than hiding them behind a fabricated
+      // chapter number.
       const graphCharIds = new Set(graph.nodes.map(n => n.id));
       for (const rawChar of raw.characters) {
+        if (!rawChar.debutKnown) continue;
         if (graphCharIds.has(rawChar.id)) {
           assert(
             rawChar.introducedAtChapter <= N,

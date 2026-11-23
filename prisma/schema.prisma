@@ -33,6 +33,8 @@ model Character {
   aliases             String[]               // alternative names for Name Resolution (4.C step 4)
   imageUrl            String
   introducedAtChapter Int
+  debutKnown          Boolean @default(false) // false = chapter is a fabricated estimate, not real data
+  isProtagonist       Boolean @default(false) // persists the MC choice so it never flips with the chapter slider
   descriptions        CharacterDescription[]
   statuses            CharacterStatus[]
   factionMemberships  FactionMembership[]

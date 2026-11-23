@@ -23,10 +23,15 @@ export default function CharacterSearch({
 
   const factionMap = useMemo(() => new Map(factions.map((f) => [f.id, f])), [factions]);
 
-  // Recommended major characters (e.g. debut Chapter 1 or primary cast)
+  // Recommended major characters (debut urut chapter; yang debut-nya tidak
+  // diketahui ditaruh paling akhir, bukan disamakan dengan chapter hasil estimasi).
   const recommendedNodes = useMemo(() => {
     return [...nodes]
-      .sort((a, b) => (a.debutChapter ?? 9999) - (b.debutChapter ?? 9999))
+      .sort((a, b) => {
+        if (a.debutKnown === false) return 1;
+        if (b.debutKnown === false) return -1;
+        return (a.debutChapter ?? 9999) - (b.debutChapter ?? 9999);
+      })
       .slice(0, 6);
   }, [nodes]);
 
@@ -275,10 +280,14 @@ export default function CharacterSearch({
                               {primaryFaction.name}
                             </span>
                           )}
-                          {node.debutChapter && (
-                            <span className="text-sky-300 font-mono">
-                              Ch. {node.debutChapter}
-                            </span>
+                          {node.debutKnown === false ? (
+                            <span className="text-slate-400 font-mono">Debut ?</span>
+                          ) : (
+                            node.debutChapter && (
+                              <span className="text-sky-300 font-mono">
+                                Ch. {node.debutChapter}
+                              </span>
+                            )
                           )}
                         </div>
                       </div>
@@ -363,10 +372,14 @@ export default function CharacterSearch({
                               {primaryFaction.name}
                             </span>
                           )}
-                          {node.debutChapter && (
-                            <span className="text-sky-300 font-mono">
-                              Debut Ch. {node.debutChapter}
-                            </span>
+                          {node.debutKnown === false ? (
+                            <span className="text-slate-400 font-mono">Debut ?</span>
+                          ) : (
+                            node.debutChapter && (
+                              <span className="text-sky-300 font-mono">
+                                Debut Ch. {node.debutChapter}
+                              </span>
+                            )
                           )}
                         </div>
                       </div>

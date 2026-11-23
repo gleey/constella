@@ -86,10 +86,10 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
     throw err;
   }
 
-  // Update character's introducedAtChapter
+  // Update character's introducedAtChapter — nilai dari parse LLM, terverifikasi.
   await prisma.character.update({
     where: { id: character.id },
-    data: { introducedAtChapter: parsed.introducedAtChapter },
+    data: { introducedAtChapter: parsed.introducedAtChapter, debutKnown: true },
   });
 
   // Write descriptions

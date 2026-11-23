@@ -221,6 +221,16 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
               </div>
             )}
 
+            {/* Debut-unknown legend (hanya muncul bila ada karakter tanpa data debut) */}
+            {data.nodes.some((n) => n.debutKnown === false) && (
+              <div className="absolute top-16 left-6 z-20 bg-[#0d1322]/90 backdrop-blur-xl px-3 py-1.5 rounded-full ring-1 ring-white/10 shadow-lg shadow-black/30 hidden md:flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full border-2 border-dashed border-slate-400" />
+                <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
+                  Debut unknown
+                </span>
+              </div>
+            )}
+
             {/* Floating profile & unlocked relations panel */}
             <FloatingPanel
               node={selectedNode}

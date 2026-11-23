@@ -205,10 +205,13 @@ export async function POST(req: NextRequest) {
           for (const r of parsed.relationships) validateTemporalBounds(r.validFrom, r.validUntil);
           for (const f of parsed.factions) validateTemporalBounds(f.validFrom, f.validUntil);
 
-          // Update introducedAtChapter
+          // Update introducedAtChapter — nilai dari parse LLM, jadi terverifikasi.
           await prisma.character.update({
             where: { id: character.id },
-            data: { introducedAtChapter: parsed.introducedAtChapter || 1 },
+            data: {
+              introducedAtChapter: parsed.introducedAtChapter || 1,
+              debutKnown: true,
+            },
           });
 
           // Insert descriptions

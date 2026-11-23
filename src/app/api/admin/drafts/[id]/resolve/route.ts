@@ -77,6 +77,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             aliases: [r.name],
             imageUrl: r.newCharacter.imageUrl,
             introducedAtChapter: r.newCharacter.introducedAtChapter,
+            debutKnown: true,
           },
         });
         remainingUnresolved.splice(idx, 1);

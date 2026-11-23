@@ -179,6 +179,7 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
       }
 
       let syncedCharCount = 0;
+      let protagonistAssigned = false;
 
       const existingCharacters = await prisma.character.findMany({
         where: { mediaId: media.id },
@@ -229,6 +230,10 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
             existing.imageUrl = finalImage;
           }
         } else {
+          // AniList's first MAIN-role cast member is the series protagonist.
+          const isProtagonist = cand.role === "MAIN" && !protagonistAssigned;
+          if (isProtagonist) protagonistAssigned = true;
+
           const newChar = await prisma.character.create({
             data: {
               mediaId: media.id,
@@ -236,6 +241,7 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
               aliases: cand.aliases,
               imageUrl: finalImage || "",
               introducedAtChapter: cand.introducedAtChapter,
+              isProtagonist,
             },
           });
 

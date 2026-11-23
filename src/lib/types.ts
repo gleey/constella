@@ -26,11 +26,13 @@ export interface GraphNode {
   name: string;
   imageUrl: string;
   debutChapter?: number;
+  /** true = debutChapter is sourced; false = fabricated estimate, shown as unknown. */
+  debutKnown?: boolean;
+  /** true = this is the series protagonist (golden node, centered). */
+  isProtagonist?: boolean;
   status: GraphNodeStatus | null;
   description: GraphNodeDescription | null;
   factions: GraphNodeFaction[];
-  /** Punya lore (deskripsi/status/faksi) — dipakai GraphCanvas untuk lore gate. */
-  hasLore?: boolean;
 }
 
 export interface GraphEdge {
@@ -48,4 +50,6 @@ export interface GraphResponse {
   factions: GraphFaction[];
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /** Stable protagonist for the whole series (null when there are no characters). */
+  protagonistId?: string | null;
 }

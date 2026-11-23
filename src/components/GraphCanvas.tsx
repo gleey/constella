@@ -12,6 +12,8 @@ interface Props {
 }
 
 const UNAFFILIATED_ID = "__unaffiliated__";
+const UNKNOWN_DEBUT_ID = "__unknown_debut__";
+const UNKNOWN_DEBUT_LABEL_ID = "__unknown_debut_label__";
 
 const KNOWN_PROTAGONISTS = [
   "sung jinwoo",
@@ -37,8 +39,14 @@ const KNOWN_PROTAGONISTS = [
 ];
 
 /** Identify the main character from the active nodes. */
-function findMainCharacterId(nodes: GraphNode[], edges: GraphResponse["edges"]): string | null {
+function findMainCharacterId(
+  nodes: GraphNode[],
+  edges: GraphResponse["edges"],
+  protagonistId?: string | null,
+): string | null {
   if (nodes.length === 0) return null;
+  // Backend-resolved protagonist wins — stable for the whole series.
+  if (protagonistId && nodes.some((n) => n.id === protagonistId)) return protagonistId;
   for (const node of nodes) {
     const lower = node.name.toLowerCase();
     if (KNOWN_PROTAGONISTS.some((p) => lower.includes(p))) {
@@ -67,6 +75,7 @@ function factionColorMap(factions: GraphFaction[]) {
   const m = new Map<string, string>();
   for (const f of factions) m.set(f.id, f.colorHex ?? "#818cf8");
   m.set(UNAFFILIATED_ID, "#64748b");
+  m.set(UNKNOWN_DEBUT_ID, "#475569");
   return m;
 }
 
@@ -149,7 +158,7 @@ export default function GraphCanvas({
 
     setInitError(null);
     const colorMap = factionColorMap(data.factions);
-    const mainCharId = findMainCharacterId(data.nodes, data.edges);
+    const mainCharId = findMainCharacterId(data.nodes, data.edges, data.protagonistId);
 
     // ── 1. Group characters by faction (excluding MC from faction bubbles to preserve center placement) ──
     const factionMembers = new Map<string, GraphNode[]>();
@@ -158,16 +167,23 @@ export default function GraphCanvas({
       factionMembers.set(f.id, []);
     }
     factionMembers.set(UNAFFILIATED_ID, []);
+    factionMembers.set(UNKNOWN_DEBUT_ID, []);
 
     let mcNode: GraphNode | null = null;
 
-    // Lore gate: tanpa deskripsi/status/faksi → tidak dirender (masih bisa dicari).
-    const visibleNodes = data.nodes.filter((n) => n.hasLore || n.id === mainCharId);
+    // Semua karakter dirender — tidak ada lore gate. Karakter yang debut-nya
+    // belum terverifikasi dikirim ke kotak khusus "Debut unknown" (masih
+    // mempunyai relasi), bukan disembunyikan.
+    const visibleNodes = data.nodes;
 
     for (const node of visibleNodes) {
       if (node.id === mainCharId) {
         mcNode = node;
         continue; // MC is placed at global center (0, 0)
+      }
+      if (node.debutKnown === false) {
+        factionMembers.get(UNKNOWN_DEBUT_ID)!.push(node);
+        continue;
       }
       const pId = getPrimaryFactionId(node);
       const targetId = factionMembers.has(pId) ? pId : UNAFFILIATED_ID;
@@ -180,6 +196,8 @@ export default function GraphCanvas({
     );
 
     activeFactionIds.sort((a, b) => {
+      if (a === UNKNOWN_DEBUT_ID) return 1;
+      if (b === UNKNOWN_DEBUT_ID) return -1;
       if (a === UNAFFILIATED_ID) return 1;
       if (b === UNAFFILIATED_ID) return -1;
       const fA = data.factions.find((f) => f.id === a);
@@ -243,6 +261,7 @@ export default function GraphCanvas({
       cursorAngle += sectorSize;
 
       const members = [...(factionMembers.get(facId) ?? [])].sort((a, b) => {
+        if (facId === UNKNOWN_DEBUT_ID) return a.name.localeCompare(b.name);
         const dA = a.debutChapter ?? 1;
         const dB = b.debutChapter ?? 1;
         if (dA !== dB) return dA - dB;
@@ -280,6 +299,7 @@ export default function GraphCanvas({
             label: node.name,
             primaryFactionId: facId,
             color: fColor,
+            unknownDebut: facId === UNKNOWN_DEBUT_ID,
             hasImage: Boolean(
               node.imageUrl &&
                 (node.imageUrl.startsWith("http://") ||
@@ -291,6 +311,25 @@ export default function GraphCanvas({
             isMainCharacter: false,
           },
           position: { x: posX, y: posY },
+        });
+      }
+
+      // Sektor "Debut unknown" diberi label di tepi luar agar jelas bahwa
+      // karakter di sini memang tidak punya data chapter debut.
+      if (facId === UNKNOWN_DEBUT_ID && members.length > 0) {
+        const midAngle = sectorStart + usable / 2;
+        const labelRadius = FIRST_RING + ring * RING_STEP + 110;
+        elements.push({
+          group: "nodes",
+          data: {
+            id: UNKNOWN_DEBUT_LABEL_ID,
+            label: "Debut unknown",
+            isZoneLabel: true,
+          },
+          position: {
+            x: Math.round(labelRadius * Math.cos(midAngle)),
+            y: Math.round(labelRadius * Math.sin(midAngle)),
+          },
         });
       }
     });
@@ -368,6 +407,33 @@ export default function GraphCanvas({
             "background-image": "data(imageUrl)",
             "background-fit": "cover",
             "background-clip": "node",
+          },
+        },
+        // Debut-unknown characters: dashed grey outline so the "unknown" box
+        // reads instantly, without hiding the node or its relations.
+        {
+          selector: "node[?unknownDebut]",
+          style: {
+            "border-style": "dashed",
+            "border-width": 2,
+            "border-color": "#64748b",
+            opacity: 0.9,
+          },
+        },
+        // Sector label for the "Debut unknown" group.
+        {
+          selector: "node[?isZoneLabel]",
+          style: {
+            label: "data(label)",
+            color: "#94a3b8",
+            "font-size": "11px",
+            "font-style": "italic",
+            "font-weight": "bold",
+            "text-background-opacity": 0,
+            "background-opacity": 0,
+            "border-width": 0,
+            width: 1,
+            height: 1,
           },
         },
         // Main Character node special highlight
@@ -488,7 +554,7 @@ export default function GraphCanvas({
   const handleZoomOut = () => cyRef.current?.zoom(cyRef.current.zoom() * 0.8);
   const handleFit = () => {
     if (!cyRef.current) return;
-    fitGraph(cyRef.current, findMainCharacterId(data.nodes, data.edges));
+    fitGraph(cyRef.current, findMainCharacterId(data.nodes, data.edges, data.protagonistId));
   };
 
   return (
@@ -537,7 +603,7 @@ export default function GraphCanvas({
       {/* Canvas Hint */}
       <div className="absolute bottom-4 right-4 z-10 pointer-events-none hidden sm:block">
         <span className="text-[11px] text-slate-400 bg-[#0b0f19]/90 px-3 py-1.5 rounded-full border border-[#1e293b]">
-          Main character centered • Faction-colored sectors • Click a node for bio & relations
+          Main character centered • Faction-colored sectors • Dashed grey = debut unknown • Click a node for bio & relations
         </span>
       </div>
     </div>

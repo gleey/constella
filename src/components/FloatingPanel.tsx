@@ -97,13 +97,21 @@ export default function FloatingPanel({
               {node.name}
             </h2>
 
-            {/* Debut chapter badge */}
-            {node.debutChapter && (
+            {/* Debut chapter badge — "unknown" bila chapter debut belum terverifikasi */}
+            {node.debutKnown === false ? (
               <div className="flex items-center gap-1.5">
-                <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-sky-500/10 text-sky-300 ring-1 ring-sky-500/25">
-                  First Appeared: Chapter {node.debutChapter}
+                <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-500/10 text-slate-300 ring-1 ring-dashed ring-slate-500/40">
+                  Debut: unknown
                 </span>
               </div>
+            ) : (
+              node.debutChapter && (
+                <div className="flex items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-sky-500/10 text-sky-300 ring-1 ring-sky-500/25">
+                    First Appeared: Chapter {node.debutChapter}
+                  </span>
+                </div>
+              )
             )}
 
             {/* Status pill */}
@@ -158,13 +166,22 @@ export default function FloatingPanel({
 
           <div className="bg-[#0b0f19]/70 p-3.5 rounded-xl ring-1 ring-white/5 text-sm text-slate-300 leading-relaxed">
             {/* Embedded debut reference inside description box */}
-            {node.debutChapter && (
+            {node.debutKnown === false ? (
               <div className="mb-2.5 pb-2.5 border-b border-white/5 text-[11px] text-slate-400 flex items-center justify-between">
                 <span>Story Introduction:</span>
-                <span className="font-semibold text-sky-300">
-                  Chapter {node.debutChapter}
+                <span className="font-semibold text-slate-400">
+                  Debut unknown
                 </span>
               </div>
+            ) : (
+              node.debutChapter && (
+                <div className="mb-2.5 pb-2.5 border-b border-white/5 text-[11px] text-slate-400 flex items-center justify-between">
+                  <span>Story Introduction:</span>
+                  <span className="font-semibold text-sky-300">
+                    Chapter {node.debutChapter}
+                  </span>
+                </div>
+              )
             )}
 
             {node.description ? (

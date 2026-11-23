@@ -104,6 +104,8 @@ const KNOWN_WIKI_SUBDOMAINS: Record<string, string> = {
   "the 100 girlfriends who really really really really really love you": "100kanojo",
   "100 girlfriends": "100kanojo",
   "yamada kun and the seven witches": "yamada-kun",
+  "a stepmother s m rchen": "the-fantasie-of-a-stepmother",
+  "eotteon gyemonimui marchen": "the-fantasie-of-a-stepmother",
 };
 
 /**
@@ -2158,5 +2160,87 @@ export async function fetchFandomCategoryCharactersPaginated(
   }
 
   return [];
+}
+
+// ── Character debut chapter ─────────────────────────────────────────────
+
+/** Infobox fields that state where a character first appears. */
+const DEBUT_FIELDS = new Set([
+  "manhwa",
+  "manga",
+  "webtoon",
+  "novel",
+  "toon",
+  "chapter",
+  "debut",
+  "first_appearance",
+  "first_episode",
+  "episode",
+]);
+
+/**
+ * Pull the earliest "Episode N"/"Chapter N" reference out of an infobox.
+ *
+ * Only debut-labelled fields are read. Free-scanning body prose would turn
+ * "(As of Episode 66)" in an occupation row into a fake debut chapter.
+ */
+export function parseDebutFromWikitext(wikitext: string): number | null {
+  const normalize = (s: string) => s.trim().toLowerCase().replace(/[\s_-]+/g, "_");
+
+  let best: number | null = null;
+  for (const rawLine of wikitext.split(/\r?\n/).slice(0, 120)) {
+    const line = rawLine.trim();
+    if (!line.startsWith("|")) continue;
+    const eq = line.indexOf("=");
+    if (eq === -1) continue;
+    const key = normalize(line.slice(1, eq));
+    if (!DEBUT_FIELDS.has(key)) continue;
+
+    const value = line.slice(eq + 1);
+    const tagged = [...value.matchAll(/\b(?:episode|chapter|ep\.?|ch\.?)\s*#?\s*(\d{1,4})\b/gi)];
+    for (const m of tagged) {
+      const n = Number(m[1]);
+      if (Number.isInteger(n) && n >= 1) best = best === null ? n : Math.min(best, n);
+    }
+    // Bare integer fallback: "|debut = 5" (a value starting with a number).
+    if (best === null && (key === "debut" || key === "chapter" || key === "episode")) {
+      const stripped = value.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]*>/g, "");
+      const bare = stripped.match(/^\s*(\d{1,4})\b/);
+      if (bare) {
+        const n = Number(bare[1]);
+        if (n >= 1) best = n;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Look up a character's real debut chapter from its Fandom infobox.
+ * Tries the canonical name then aliases; returns null when no page states one.
+ */
+export async function fetchCharacterDebutChapter(
+  wikiSubdomain: string,
+  name: string,
+  aliases: string[] = [],
+): Promise<number | null> {
+  const { subdomain } = parseWikiTarget(wikiSubdomain);
+  if (!subdomain) return null;
+
+  const cacheKey = `fandom:debut:${subdomain}:${name.toLowerCase()}`;
+  const cached = cacheGet<number>(cacheKey);
+  if (cached !== null) return cached;
+
+  const candidates = Array.from(new Set([name, ...aliases].filter(Boolean)));
+  for (const title of candidates) {
+    const wt = await fetchWikitext(subdomain, title);
+    if (!wt) continue;
+    const chapter = parseDebutFromWikitext(wt);
+    if (chapter !== null) {
+      cacheSet(cacheKey, chapter, FANDOM_CACHE_TTL);
+      return chapter;
+    }
+  }
+  return null;
 }
 
