@@ -287,6 +287,7 @@ const PAGE_SIZE = 24;
 
 export default function HomePage() {
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
+  const [featuredMedia, setFeaturedMedia] = useState<MediaItem[]>([]);
   const [search, setSearch] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -295,7 +296,12 @@ export default function HomePage() {
   const [selectedType, setSelectedType] = useState<string>("ALL");
   const [selectedRating, setSelectedRating] = useState<string>("SAFE");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
-  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
+  const filterKey = `${search}::${selectedType}::${selectedRating}::${selectedStatus}`;
+  const [pagination, setPagination] = useState<{ key: string; count: number }>({
+    key: filterKey,
+    count: PAGE_SIZE,
+  });
+  const visibleCount = pagination.key === filterKey ? pagination.count : PAGE_SIZE;
   const [loading, setLoading] = useState(true);
   const carouselRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -386,6 +392,15 @@ export default function HomePage() {
         if (res.ok) {
           const list: MediaItem[] = await res.json();
           setMediaList(list);
+          // Featured rail tampil acak tiap kali halaman dibuka, tanpa mengubah
+          // urutan katalog di bawah (tetap urutan API).
+          // Sembunyikan konten suggestive / 18+ dari Featured Today.
+          const featuredPool = list.filter((m) => m.contentRating !== "SUGGESTIVE_18");
+          for (let i = featuredPool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [featuredPool[i], featuredPool[j]] = [featuredPool[j], featuredPool[i]];
+          }
+          setFeaturedMedia(featuredPool.slice(0, 20));
         }
       } catch (err) {
         console.error("Failed to load media catalog", err);
@@ -395,18 +410,6 @@ export default function HomePage() {
     }
     loadMedia();
   }, []);
-
-  // Featured rail tampil acak tiap kali halaman dibuka, tanpa mengubah
-  // urutan katalog di bawah (tetap urutan API).
-  // Sembunyikan konten suggestive / 18+ dari Featured Today.
-  const featuredMedia = useMemo(() => {
-    const list = mediaList.filter((m) => m.contentRating !== "SUGGESTIVE_18");
-    for (let i = list.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [list[i], list[j]] = [list[j], list[i]];
-    }
-    return list.slice(0, 20);
-  }, [mediaList]);
 
   // Filter list by Type, Search, Content Rating, and Release Status
   const filteredMedia = useMemo(() => {
@@ -435,11 +438,6 @@ export default function HomePage() {
       return true;
     });
   }, [mediaList, search, selectedType, selectedRating, selectedStatus]);
-
-  // Reset pagination when search or filters change
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [search, selectedType, selectedRating, selectedStatus]);
 
   // Slice displayed media for performance
   const displayedMedia = useMemo(() => {
@@ -1103,7 +1101,7 @@ export default function HomePage() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+                  onClick={() => setPagination({ key: filterKey, count: visibleCount + PAGE_SIZE })}
                   className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-950/50 hover:shadow-indigo-500/25 ring-1 ring-white/10 transition-all cursor-pointer flex items-center gap-2"
                 >
                   <span>Tampilkan Lebih Banyak</span>

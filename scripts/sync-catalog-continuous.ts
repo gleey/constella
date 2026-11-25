@@ -16,7 +16,7 @@
 
 import { prisma } from "../src/lib/prisma";
 import { fetchPopularMediaPage } from "../src/lib/anilist";
-import { importCatalog, syncOngoingReleases } from "../src/lib/catalog-import";
+import { syncOngoingReleases } from "../src/lib/catalog-import";
 import { resolveTotalChapters } from "../src/lib/chapter-count";
 
 // Safe rate limit delay: 800ms between requests keeps req/min at ~75 (safe under 90 cap)
@@ -45,9 +45,10 @@ async function runCatalogCycle() {
     console.log(
       `Ongoing sync: ${ongoingResult.imported} new, ${ongoingResult.updated} updated across ${ongoingResult.pages} pages.`
     );
-  } catch (err: any) {
-    console.warn(`Ongoing sync error: ${err.message}`);
-    if (err.message?.includes("429")) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`Ongoing sync error: ${msg}`);
+    if (msg.includes("429")) {
       console.log("Rate limited! Pausing for 60 seconds...");
       await sleep(60000);
     }
@@ -135,9 +136,10 @@ async function runCatalogCycle() {
         }
 
         await sleep(SAFE_DELAY_MS);
-      } catch (err: any) {
-        console.error(`Error on ${country} page ${page}:`, err.message);
-        if (err.message?.includes("429")) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`Error on ${country} page ${page}:`, msg);
+        if (msg.includes("429")) {
           console.log("Hit rate limit (429). Sleeping 60s before retry...");
           await sleep(60000);
           page--; // retry same page

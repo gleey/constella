@@ -213,9 +213,9 @@ async function main() {
         }
         console.log(`[DB] ${detail.characters.length} AniList characters synced for "${media.title}"`);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       failed++;
-      console.warn(`[WARN] Failed AniList #${anilistId}: ${err?.message || String(err)}`);
+      console.warn(`[WARN] Failed AniList #${anilistId}: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     if (i < targets.length - 1) await sleep(opts.throttleMs);

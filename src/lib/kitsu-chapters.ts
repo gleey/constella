@@ -34,13 +34,32 @@ export interface KitsuChapterInfo {
   kitsuId: string;
 }
 
-async function fetchJson(url: string, timeoutMs = 8000): Promise<any | null> {
+interface KitsuAttributes {
+  chapterCount?: number | null;
+  status?: unknown;
+  subtype?: unknown;
+  canonicalTitle?: unknown;
+}
+
+interface KitsuMediaEntry {
+  id: string;
+  attributes?: KitsuAttributes;
+}
+
+interface KitsuMappingEntry {
+  attributes?: {
+    externalSite?: string;
+    externalId?: unknown;
+  };
+}
+
+async function fetchJson<T = unknown>(url: string, timeoutMs = 8000): Promise<T | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { headers: KITSU_HEADERS, signal: controller.signal });
     if (!res.ok) return null;
-    return await res.json();
+    return (await res.json()) as T;
   } catch {
     return null;
   } finally {
@@ -57,7 +76,7 @@ function normalizeStatus(raw: unknown): KitsuChapterInfo["status"] {
   return null;
 }
 
-function toInfo(id: string, attributes: any): KitsuChapterInfo {
+function toInfo(id: string, attributes?: KitsuAttributes): KitsuChapterInfo {
   const count = attributes?.chapterCount;
   return {
     chapters: typeof count === "number" && count > 0 ? count : null,
@@ -83,11 +102,11 @@ export async function verifyKitsuAniListMapping(
   const cached = cacheGet<{ matched: boolean }>(cacheKey);
   if (cached) return cached.matched;
 
-  const mapping = await fetchJson(
+  const mapping = await fetchJson<{ data?: KitsuMappingEntry[] }>(
     `${KITSU_API}/manga/${kitsuId}/mappings?page[limit]=25`,
   );
   const matched = (mapping?.data ?? []).some(
-    (m: any) =>
+    (m) =>
       m?.attributes?.externalSite === "anilist/manga" &&
       String(m?.attributes?.externalId) === String(anilistId),
   );
@@ -125,9 +144,9 @@ export async function findKitsuChapterInfo(
 
   // Collect candidates across the known title forms, keeping only entries of
   // the right publication type whose title actually resembles the series.
-  const candidates: any[] = [];
+  const candidates: KitsuMediaEntry[] = [];
   for (const form of forms.slice(0, 3)) {
-    const json = await fetchJson(
+    const json = await fetchJson<{ data?: KitsuMediaEntry[] }>(
       `${KITSU_API}/manga?filter[text]=${encodeURIComponent(form)}&page[limit]=5`,
     );
     for (const entry of json?.data ?? []) {

@@ -47,7 +47,27 @@ export default function ReviewPage() {
     setDrafts(Array.isArray(data) ? data : []);
   }, [filterStatus]);
 
-  useEffect(() => { loadDrafts(); }, [loadDrafts]);
+  useEffect(() => {
+    let active = true;
+    const params = filterStatus ? `?status=${filterStatus}` : "";
+    fetch(`/api/admin/drafts${params}`)
+      .then(async (res) => {
+        if (!active) return;
+        if (!res.ok) {
+          setDrafts([]);
+          setMessage(res.status === 401 ? "Sesi admin berakhir. Silakan login ulang." : "Gagal memuat draft.");
+          return;
+        }
+        const data = await res.json();
+        if (active) setDrafts(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (active) setMessage("Gagal memuat draft.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [filterStatus]);
 
   async function selectDraft(draft: Draft) {
     setSelected(draft);
@@ -89,7 +109,7 @@ export default function ReviewPage() {
     if (action === "create") {
       resolution.newCharacter = {
         name,
-        imageUrl: "/images/placeholder.webp",
+        imageUrl: "",
         introducedAtChapter: editedJson?.introducedAtChapter ?? 1,
       };
     }

@@ -126,7 +126,7 @@ async function runImport({
               existing?.totalChapters,
             );
 
-            let resolvedStatus = item.status;
+            const resolvedStatus = item.status;
 
             try {
               if (existing) {

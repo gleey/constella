@@ -119,8 +119,8 @@ async function runCatalogSync(targetAnilistId?: number) {
           targets.push({ anilistId: p.id, titleHint: p.title });
         }
       }
-    } catch (e: any) {
-      addLog(`Discovery AniList error: ${e.message}`);
+    } catch (e: unknown) {
+      addLog(`Discovery AniList error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -140,8 +140,8 @@ async function runCatalogSync(targetAnilistId?: number) {
       let anilistDetail;
       try {
         anilistDetail = await fetchMediaDetail(target.anilistId);
-      } catch (err: any) {
-        addLog(`Gagal mengambil AniList detail untuk ID ${target.anilistId}: ${err.message}`);
+      } catch (err: unknown) {
+        addLog(`Gagal mengambil AniList detail untuk ID ${target.anilistId}: ${err instanceof Error ? err.message : String(err)}`);
       }
 
       if (!anilistDetail) {
@@ -264,8 +264,8 @@ async function runCatalogSync(targetAnilistId?: number) {
               });
             }
           }
-        } catch (e: any) {
-          addLog(`Gagal mengambil karakter Fandom: ${e.message}`);
+        } catch (e: unknown) {
+          addLog(`Gagal mengambil karakter Fandom: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
@@ -334,7 +334,7 @@ async function runCatalogSync(targetAnilistId?: number) {
         for (let i = 0; i < charactersToSync.length; i += IMG_CONCURRENCY) {
           const batch = charactersToSync.slice(i, i + IMG_CONCURRENCY);
           const results = await Promise.allSettled(
-            batch.map((c, j) =>
+            batch.map((c) =>
               isBrokenImageUrl(c.imageUrl)
                 ? fetchCharacterImage(wikiSubdomain, c.name, c.aliases)
                 : Promise.resolve(null)
@@ -535,9 +535,10 @@ async function runCatalogSync(targetAnilistId?: number) {
 
       globalState.completedSeries++;
       globalState.progress = Math.round((globalState.completedSeries / globalState.totalSeries) * 100);
-    } catch (err: any) {
-      addLog(`Error pada seri ID ${target.anilistId}: ${err.message}`);
-      globalState.lastError = err.message;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addLog(`Error pada seri ID ${target.anilistId}: ${msg}`);
+      globalState.lastError = msg;
     }
   }
 
@@ -601,14 +602,15 @@ REQUIREMENTS:
         const text = (res.text ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
         const parsed = JSON.parse(text);
         return normalizeGeminiOutput(parsed, totalChapters);
-      } catch (err: any) {
-        console.warn(`[Gemini-Synth] Model ${model} gagal: ${err.message || String(err)}. Lanjut ke model berikut...`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[Gemini-Synth] Model ${model} gagal: ${msg}. Lanjut ke model berikut...`);
         if (
-          err?.message?.includes("429") ||
-          err?.message?.includes("RESOURCE_EXHAUSTED") ||
-          err?.message?.includes("Quota exceeded") ||
-          err?.message?.includes("timeout") ||
-          err?.message?.includes("ETIMEDOUT")
+          msg.includes("429") ||
+          msg.includes("RESOURCE_EXHAUSTED") ||
+          msg.includes("Quota exceeded") ||
+          msg.includes("timeout") ||
+          msg.includes("ETIMEDOUT")
         ) {
           console.log(`[Gemini-Synth] Kuota habis / timeout pada Gemini. Beralih langsung ke Groq fallback...`);
           break;
@@ -656,8 +658,9 @@ REQUIREMENTS:
         }
 
         console.warn(`[Groq-Synth] Model ${groqModel} gagal (HTTP ${groqRes.status}). Lanjut ke model berikut...`);
-      } catch (e: any) {
-        console.warn(`[Groq-Synth] Model ${groqModel} error: ${e.message || String(e)}. Lanjut ke model berikut...`);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`[Groq-Synth] Model ${groqModel} error: ${msg}. Lanjut ke model berikut...`);
       }
     }
   }
@@ -904,8 +907,8 @@ async function runLoreSync(targetAnilistId?: number, batch?: number) {
         if (!parsed) {
           try {
             parsed = await synthesizeLoreFallback(dbChar.name, media.title, media.totalChapters, allNamesList);
-          } catch (e: any) {
-            addLog(`Sintesis lore dilewati untuk ${dbChar.name}: ${e.message}`);
+          } catch (e: unknown) {
+            addLog(`Sintesis lore dilewati untuk ${dbChar.name}: ${e instanceof Error ? e.message : String(e)}`);
           }
         }
 
@@ -1009,9 +1012,10 @@ async function runLoreSync(targetAnilistId?: number, batch?: number) {
 
       globalState.completedSeries++;
       globalState.progress = Math.round((globalState.completedSeries / globalState.totalSeries) * 100);
-    } catch (err: any) {
-      addLog(`Error lore sync ${media.title}: ${err.message}`);
-      globalState.lastError = err.message;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addLog(`Error lore sync ${media.title}: ${msg}`);
+      globalState.lastError = msg;
     }
   }
 

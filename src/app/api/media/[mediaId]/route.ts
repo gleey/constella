@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { normalizeRelations, relatedMediaIds } from "@/lib/media-relations";
 import { requireAdmin } from "@/lib/admin-auth";
@@ -64,6 +65,9 @@ export async function DELETE(
     await prisma.media.delete({
       where: { id: mediaId },
     });
+
+    revalidatePath("/sitemap.xml");
+    revalidatePath(`/media/${mediaId}`);
 
     return NextResponse.json({
       success: true,

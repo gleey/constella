@@ -55,8 +55,8 @@ async function main() {
           detail = await fetchMediaDetail(effectiveAnilistId);
           console.log(`  ✓ Found real AniList ID: ${effectiveAnilistId} ("${detail.title}")`);
         }
-      } catch (err: any) {
-        console.log(`  ! Search also failed: ${err.message}`);
+      } catch (err: unknown) {
+        console.log(`  ! Search also failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -146,8 +146,8 @@ async function main() {
             foundUrl = fandomImg;
             console.log(`    → Resolved from Fandom Wiki: ${foundUrl}`);
           }
-        } catch (e: any) {
-          console.log(`    ! Fandom fetch error: ${e.message}`);
+        } catch (e: unknown) {
+          console.log(`    ! Fandom fetch error: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 

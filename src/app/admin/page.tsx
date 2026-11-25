@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import Image from "next/image";
 
 /**
  * Build the login URL for the CURRENT admin surface. When the admin UI is
@@ -192,18 +193,17 @@ export default function AdminPage() {
     }
   };
 
-  const loadMedia = async () => {
+  const loadMedia = useCallback(async () => {
     try {
       const res = await fetch("/api/media");
+      if (!res.ok) return;
       const list: MediaItem[] = await res.json();
       setMediaList(list);
-      if (list.length > 0 && !selectedMediaId) {
-        setSelectedMediaId(list[0].id);
-      }
+      setSelectedMediaId((prev) => prev || (list.length > 0 ? list[0].id : ""));
     } catch (err) {
       console.error(err);
     }
-  };
+  }, []);
 
   const handleDeleteMedia = async (mediaId: string, mediaTitle: string) => {
     if (!confirm(`Delete "${mediaTitle}" and all its characters, relationships, and factions? This cannot be undone.`)) {
@@ -243,7 +243,7 @@ export default function AdminPage() {
   useEffect(() => {
     loadMedia();
     checkBgStatus();
-  }, []);
+  }, [loadMedia]);
 
   // Poll background sync every 2.5s if running
   useEffect(() => {
@@ -261,22 +261,34 @@ export default function AdminPage() {
       } catch {}
     }, 2500);
     return () => clearInterval(interval);
-  }, [bgStatus?.isRunning]);
+  }, [bgStatus?.isRunning, loadMedia]);
 
   // Load editable page content when the Pages tab is opened or the selected
   // page (about / methodology) changes.
   useEffect(() => {
     if (activeTab !== "pages") return;
+    let active = true;
     setLoadingPage(true);
     setPageStatus(null);
     fetch(`/api/pages/${pageSlug}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load");
+        return r.json();
+      })
       .then((data) => {
+        if (!active) return;
         setPageTitle(data.title ?? "");
         setPageContent(data.content ?? "");
       })
-      .catch(() => setPageStatus("Failed to load page content."))
-      .finally(() => setLoadingPage(false));
+      .catch(() => {
+        if (active) setPageStatus("Failed to load page content.");
+      })
+      .finally(() => {
+        if (active) setLoadingPage(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [activeTab, pageSlug]);
 
   const handleSavePage = async () => {
@@ -954,11 +966,18 @@ export default function AdminPage() {
                   key={m.id}
                   className="p-4 rounded-2xl bg-white/[0.03] ring-1 ring-white/10 hover:ring-[#6366f1]/50 transition-colors flex gap-4 items-center"
                 >
-                  <img
-                    src={m.coverImage}
-                    alt={m.title}
-                    className="w-16 h-24 object-cover rounded-xl bg-black/30 shrink-0 ring-1 ring-white/10"
-                  />
+                  {m.coverImage ? (
+                    <Image
+                      src={m.coverImage}
+                      alt={m.title}
+                      width={64}
+                      height={96}
+                      unoptimized
+                      className="w-16 h-24 object-cover rounded-xl bg-black/30 shrink-0 ring-1 ring-white/10"
+                    />
+                  ) : (
+                    <div className="w-16 h-24 rounded-xl bg-black/30 shrink-0 ring-1 ring-white/10" />
+                  )}
                   <div className="flex-1 min-w-0">
                     <h3 className="font-bold text-white text-base truncate">{m.title}</h3>
                     <p className="text-xs text-slate-400 mt-0.5">
@@ -1048,11 +1067,18 @@ export default function AdminPage() {
                           : "bg-white/[0.03] border-white/10 hover:bg-[#1a233a]"
                       }`}
                     >
-                      <img
-                        src={res.coverImage}
-                        alt={res.title}
-                        className="w-10 h-14 object-cover rounded bg-[#0b0f19] shrink-0"
-                      />
+                      {res.coverImage ? (
+                        <Image
+                          src={res.coverImage}
+                          alt={res.title}
+                          width={40}
+                          height={56}
+                          unoptimized
+                          className="w-10 h-14 object-cover rounded bg-[#0b0f19] shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-14 rounded bg-[#0b0f19] shrink-0" />
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-semibold text-white truncate">{res.title}</div>
                         <div className="text-xs text-slate-400 mt-0.5">
@@ -1076,11 +1102,18 @@ export default function AdminPage() {
 
               {selectedMedia ? (
                 <div className="p-3 rounded-lg bg-[#0b0f19] ring-1 ring-white/10 flex gap-3 items-center">
-                  <img
-                    src={selectedMedia.coverImage}
-                    alt={selectedMedia.title}
-                    className="w-12 h-16 object-cover rounded"
-                  />
+                  {selectedMedia.coverImage ? (
+                    <Image
+                      src={selectedMedia.coverImage}
+                      alt={selectedMedia.title}
+                      width={48}
+                      height={64}
+                      unoptimized
+                      className="w-12 h-16 object-cover rounded"
+                    />
+                  ) : (
+                    <div className="w-12 h-16 rounded bg-white/5 shrink-0" />
+                  )}
                   <div>
                     <div className="font-bold text-white text-sm">{selectedMedia.title}</div>
                     <div className="text-xs text-slate-400">AniList ID: {selectedMedia.id}</div>
@@ -1114,7 +1147,7 @@ export default function AdminPage() {
                 </label>
                 <select
                   value={chapterNumberingSource}
-                  onChange={(e) => setChapterNumberingSource(e.target.value as any)}
+                  onChange={(e) => setChapterNumberingSource(e.target.value as "official_en" | "raw_kr" | "raw_jp")}
                   className="w-full bg-[#0b0f19] ring-1 ring-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#818cf8]"
                 >
                   <option value="official_en">Official English Translation (Webtoon/Tapas)</option>
@@ -1295,20 +1328,38 @@ export default function AdminPage() {
                         return (
                           <tr key={r.id} className="hover:bg-[#1a233a] transition-colors">
                             <td className="p-3 font-medium text-white flex items-center gap-2">
-                              <img
-                                src={r.sourceCharacter.imageUrl}
-                                alt={r.sourceCharacter.name}
-                                className="w-6 h-6 rounded-full object-cover bg-gray-800"
-                              />
+                              {r.sourceCharacter.imageUrl ? (
+                                <Image
+                                  src={r.sourceCharacter.imageUrl}
+                                  alt={r.sourceCharacter.name}
+                                  width={24}
+                                  height={24}
+                                  unoptimized
+                                  className="w-6 h-6 rounded-full object-cover bg-gray-800 shrink-0"
+                                />
+                              ) : (
+                                <span className="w-6 h-6 rounded-full bg-gray-800 text-[10px] flex items-center justify-center shrink-0">
+                                  {r.sourceCharacter.name.slice(0, 1).toUpperCase()}
+                                </span>
+                              )}
                               {r.sourceCharacter.name}
                             </td>
                             <td className="p-3 font-medium text-white">
                               <div className="flex items-center gap-2">
-                                <img
-                                  src={r.targetCharacter.imageUrl}
-                                  alt={r.targetCharacter.name}
-                                  className="w-6 h-6 rounded-full object-cover bg-gray-800"
-                                />
+                                {r.targetCharacter.imageUrl ? (
+                                  <Image
+                                    src={r.targetCharacter.imageUrl}
+                                    alt={r.targetCharacter.name}
+                                    width={24}
+                                    height={24}
+                                    unoptimized
+                                    className="w-6 h-6 rounded-full object-cover bg-gray-800 shrink-0"
+                                  />
+                                ) : (
+                                  <span className="w-6 h-6 rounded-full bg-gray-800 text-[10px] flex items-center justify-center shrink-0">
+                                    {r.targetCharacter.name.slice(0, 1).toUpperCase()}
+                                  </span>
+                                )}
                                 {r.targetCharacter.name}
                               </div>
                             </td>

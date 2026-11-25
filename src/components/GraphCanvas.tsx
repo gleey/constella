@@ -105,7 +105,8 @@ export default function GraphCanvas({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
-  const [initError, setInitError] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<{ data: GraphResponse; message: string } | null>(null);
+  const initError = errorState?.data === data ? errorState.message : null;
 
   // Simpan callback di ref supaya perubahan identitasnya (inline arrow di
   // parent) tidak menyalin ulang instance Cytoscape tiap kali node diklik —
@@ -129,9 +130,12 @@ export default function GraphCanvas({
         easing: "ease-out-cubic",
       });
       target.addClass("highlighted");
-      setTimeout(() => {
-        target.removeClass("highlighted");
+      const timer = setTimeout(() => {
+        if (cyRef.current === cy && !cy.destroyed()) {
+          target.removeClass("highlighted");
+        }
       }, 1500);
+      return () => clearTimeout(timer);
     }
   }, [focusNodeId]);
 
@@ -158,7 +162,6 @@ export default function GraphCanvas({
     // crashes internally (e.g. "can't access property 'value', p is null").
     if (!container || !container.isConnected) return;
 
-    setInitError(null);
     const colorMap = factionColorMap(data.factions);
     const mainCharId = findMainCharacterId(data.nodes, data.edges, data.protagonistId);
 
@@ -576,7 +579,8 @@ export default function GraphCanvas({
     cyRef.current = cy;
     } catch (err) {
       console.error("Cytoscape init failed:", err);
-      setInitError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      queueMicrotask(() => setErrorState({ data, message }));
       cyRef.current = null;
       return;
     }

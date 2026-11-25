@@ -25,10 +25,10 @@ interface Resolution {
 
 function safeImageUrl(raw: string): string {
   const trimmed = String(raw || "").trim();
-  if (trimmed.startsWith("/") || trimmed.startsWith("https://") || trimmed.startsWith("http://")) {
+  if ((trimmed.startsWith("/") && !trimmed.startsWith("//")) || trimmed.startsWith("https://")) {
     return trimmed;
   }
-  return "/images/placeholder.webp";
+  return "";
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {

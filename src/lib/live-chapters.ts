@@ -74,8 +74,24 @@ function requestIPv4(url: string, options: { method?: string; body?: string; hea
   return task;
 }
 
+interface MangaUpdatesRecord {
+  series_id?: number | string;
+  type?: unknown;
+  title?: unknown;
+}
+
+interface MangaUpdatesSearchResponse {
+  results?: Array<{ record?: MangaUpdatesRecord }>;
+}
+
+interface MangaUpdatesDetail {
+  status?: string;
+  latest_chapter?: number;
+  completed?: boolean;
+}
+
 function requestIPv4Now(url: string, options: { method?: string; body?: string; headers?: Record<string, string> } = {}) {
-  return new Promise<{ ok: boolean; status: number; json: () => Promise<any> }>((resolve, reject) => {
+  return new Promise<{ ok: boolean; status: number; json: <T = unknown>() => Promise<T> }>((resolve, reject) => {
     const u = new URL(url);
     const req = https.request(
       {
@@ -124,7 +140,7 @@ function requestIPv4Now(url: string, options: { method?: string; body?: string; 
  * fall back to `latest_chapter`, which is the highest chapter number reached
  * and therefore the closest available approximation of the total.
  */
-function parseChapterFromDetail(detail: any): number | null {
+function parseChapterFromDetail(detail: MangaUpdatesDetail | null | undefined): number | null {
   if (!detail) return null;
   const status: string = detail.status || "";
 
@@ -151,7 +167,7 @@ function parseChapterFromDetail(detail: any): number | null {
   return null;
 }
 
-export function parseStatusFromDetail(detail: any): MediaReleaseStatus | null {
+export function parseStatusFromDetail(detail: MangaUpdatesDetail | null | undefined): MediaReleaseStatus | null {
   if (!detail) return null;
   const statusStr: string = detail.status || "";
   const firstLine = statusStr.split("\n")[0] || "";
@@ -202,11 +218,13 @@ export function parseStatusFromDetail(detail: any): MediaReleaseStatus | null {
  * bound derived from it.
  */
 function pickMangaUpdatesRecord(
-  results: Array<{ record?: any }>,
+  results: Array<{ record?: MangaUpdatesRecord }>,
   titleForms: string[],
   expectedType: "MANGA" | "MANHWA" | "UNKNOWN",
-): any | null {
-  const records = results.map((r) => r?.record).filter((r) => r && r.series_id);
+): MangaUpdatesRecord | null {
+  const records = results
+    .map((r) => r?.record)
+    .filter((r): r is MangaUpdatesRecord => Boolean(r && r.series_id));
   if (records.length === 0) return null;
 
   const typeMatches = (type: unknown): boolean => {
@@ -316,7 +334,7 @@ export async function fetchLiveMangaInfo(
       .filter(Boolean);
     const uniqueForms = [...new Set(forms)];
 
-    let bestRecord: any | null = null;
+    let bestRecord: MangaUpdatesRecord | null = null;
     // Title forms are queried one at a time through the spaced queue (AUP),
     // in original form order so the exact/primary form keeps priority over
     // looser synonyms. Each response is cached, so repeat syncs are free.
@@ -324,7 +342,7 @@ export async function fetchLiveMangaInfo(
       if (!mangaUpdatesAvailable()) break;
 
       const cacheKey = `mu:search:${form.toLowerCase()}`;
-      let searchData = cacheGet<any>(cacheKey);
+      let searchData = cacheGet<MangaUpdatesSearchResponse>(cacheKey);
       if (!searchData) {
         const searchRes = await requestIPv4("https://api.mangaupdates.com/v1/series/search", {
           method: "POST",
@@ -336,7 +354,7 @@ export async function fetchLiveMangaInfo(
           noteMangaUpdatesFailure();
           continue;
         }
-        searchData = await searchRes.json();
+        searchData = await searchRes.json<MangaUpdatesSearchResponse>();
         cacheSet(cacheKey, searchData, MU_CACHE_TTL_MS);
       }
 
@@ -349,7 +367,7 @@ export async function fetchLiveMangaInfo(
 
     if (bestRecord?.series_id) {
       const detailKey = `mu:series:${bestRecord.series_id}`;
-      let detail = cacheGet<any>(detailKey);
+      let detail = cacheGet<MangaUpdatesDetail>(detailKey);
       if (!detail) {
         const detailRes = await requestIPv4(
           `https://api.mangaupdates.com/v1/series/${bestRecord.series_id}`,
@@ -358,7 +376,7 @@ export async function fetchLiveMangaInfo(
           noteMangaUpdatesFailure();
           detail = null;
         } else {
-          detail = await detailRes.json();
+          detail = await detailRes.json<MangaUpdatesDetail>();
           cacheSet(detailKey, detail, MU_CACHE_TTL_MS);
         }
       }

@@ -21,13 +21,14 @@ export default function ChapterSlider({
   // Nilai sementara selama slider di-hold/digeser. onChange baru dipanggil
   // saat jari/mouse dilepas, supaya grafik tidak refetch di setiap pixel
   // (yang tadinya men-disable slider di tengah drag).
-  const [draft, setDraftState] = useState<number | null>(null);
+  const [draftState, setDraftState] = useState<{ total: number; value: number } | null>(null);
+  const draft = draftState && draftState.total === totalChapters ? draftState.value : null;
   const [isDragging, setIsDragging] = useState(false);
   const draftRef = useRef<number | null>(null);
 
   const setDraft = (value: number | null) => {
     draftRef.current = value;
-    setDraftState(value);
+    setDraftState(value === null ? null : { total: totalChapters, value });
   };
 
   const finishDrag = useCallback(() => {
@@ -55,7 +56,6 @@ export default function ChapterSlider({
   // Ganti seri → buang draft dari seri sebelumnya.
   useEffect(() => {
     draftRef.current = null;
-    setDraftState(null);
   }, [totalChapters]);
 
   const clamp = (val: number) => Math.min(totalChapters, Math.max(1, val));

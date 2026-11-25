@@ -30,8 +30,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ error: "Draft already reviewed, cannot edit" }, { status: 409 });
   }
 
-  const body = await req.json();
-  const { parsedJson } = body;
+  const body = await req.json().catch(() => null);
+  const parsedJson = body?.parsedJson;
 
   if (!parsedJson) {
     return NextResponse.json({ error: "parsedJson required" }, { status: 400 });

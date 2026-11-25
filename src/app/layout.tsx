@@ -14,7 +14,17 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+function resolveMetadataBase(): URL {
+  const raw = (process.env.NEXT_PUBLIC_SITE_URL || "").trim();
+  try {
+    return new URL(raw || "https://constella.app");
+  } catch {
+    return new URL("https://constella.app");
+  }
+}
+
 export const metadata: Metadata = {
+  metadataBase: resolveMetadataBase(),
   title: "Constella — Zero-Spoiler Character Map",
   description:
     "Explore manga & manhwa character relationships chapter by chapter, without spoilers",

@@ -92,8 +92,9 @@ async function backfill() {
 
       // Polite rate limit delay
       await sleep(750);
-    } catch (err: any) {
-      console.error("Batch error:", err.message);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Batch error:", msg);
     }
   }
 

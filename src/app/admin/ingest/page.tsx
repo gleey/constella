@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 
 function adminBasePath(): string {
   if (typeof window === "undefined") return "/admin";
@@ -116,7 +117,11 @@ export default function IngestPage() {
               onClick={() => handleSelect(r)}
               className="w-full flex items-center gap-3 p-3 border border-gray-700 rounded hover:bg-gray-800 text-left"
             >
-              <img src={r.coverImage} alt="" className="w-12 h-16 object-cover rounded" />
+              {r.coverImage ? (
+                <Image src={r.coverImage} alt="" width={48} height={64} unoptimized className="w-12 h-16 object-cover rounded" />
+              ) : (
+                <div className="w-12 h-16 rounded bg-gray-800 shrink-0" />
+              )}
               <div>
                 <div className="font-medium">{r.title}</div>
                 <div className="text-sm text-gray-400">
@@ -132,7 +137,11 @@ export default function IngestPage() {
       {selected && (
         <div className="space-y-4 mb-6 p-4 border border-gray-700 rounded">
           <div className="flex items-center gap-3">
-            <img src={selected.coverImage} alt="" className="w-16 h-20 object-cover rounded" />
+            {selected.coverImage ? (
+              <Image src={selected.coverImage} alt="" width={64} height={80} unoptimized className="w-16 h-20 object-cover rounded" />
+            ) : (
+              <div className="w-16 h-20 rounded bg-gray-800 shrink-0" />
+            )}
             <div>
               <div className="font-bold text-lg">{selected.title}</div>
               <div className="text-sm text-gray-400">AniList ID: {selected.id}</div>

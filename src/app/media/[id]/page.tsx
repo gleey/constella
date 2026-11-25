@@ -201,7 +201,6 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
                 {media.relations.length > 0 && (
                   <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400 min-w-0">
                     {media.relations.map((r) => {
-                      const label = `${r.relationType === "PREQUEL" ? "Prequel" : "Sequel"}: ${r.title}`;
                       return r.mediaId ? (
                         <Link
                           key={r.anilistId}

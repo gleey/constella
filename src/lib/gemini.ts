@@ -178,8 +178,18 @@ const GEMINI_CHARACTER_SCHEMA = {
   propertyOrdering: ["introducedAtChapter", "descriptions", "statuses", "relationships", "factions"],
 } as const;
 
-function parseChapterInt(val: any, fallback: number): number {
-  if (Number.isInteger(val)) return Math.max(1, val);
+function asRecord(val: unknown): Record<string, unknown> {
+  return val && typeof val === "object" && !Array.isArray(val)
+    ? (val as Record<string, unknown>)
+    : {};
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function parseChapterInt(val: unknown, fallback: number): number {
+  if (typeof val === "number" && Number.isInteger(val)) return Math.max(1, val);
   if (typeof val === "string") {
     const m = val.match(/\d+/);
     if (m) return Math.max(1, parseInt(m[0], 10));
@@ -187,8 +197,8 @@ function parseChapterInt(val: any, fallback: number): number {
   return fallback;
 }
 
-function parseChapterIntOrNull(val: any): number | null {
-  if (Number.isInteger(val) && val > 0) return val;
+function parseChapterIntOrNull(val: unknown): number | null {
+  if (typeof val === "number" && Number.isInteger(val) && val > 0) return val;
   if (typeof val === "string") {
     const m = val.match(/\d+/);
     if (m) {
@@ -202,11 +212,13 @@ function parseChapterIntOrNull(val: any): number | null {
 /**
  * Normalizes any schema variations returned by LLM into strict GeminiParsedCharacter format.
  */
-export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiParsedCharacter {
+export function normalizeGeminiOutput(rawInput: unknown, totalChapters: number): GeminiParsedCharacter {
+  const raw = asRecord(rawInput);
   const introducedAtChapter = parseChapterInt(raw.introducedAtChapter, 1);
 
   const rawDescriptions = Array.isArray(raw.descriptions) ? raw.descriptions : [];
-  const descriptions = rawDescriptions.map((d: any, idx: number) => {
+  const descriptions = rawDescriptions.map((item: unknown, idx: number) => {
+    const d = asRecord(item);
     const text = String(d.text || d.description || d.content || `Character arc ${idx + 1}`).trim();
     const validFrom = parseChapterInt(d.validFrom, introducedAtChapter);
     let validUntil = parseChapterIntOrNull(d.validUntil);
@@ -235,7 +247,8 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
   }
 
   const rawStatuses = Array.isArray(raw.statuses) ? raw.statuses : [];
-  const statuses = rawStatuses.map((s: any) => {
+  const statuses = rawStatuses.map((item: unknown) => {
+    const s = asRecord(item);
     let status = String(s.status || "Alive").trim();
     if (!["Alive", "Deceased", "Imprisoned", "MIA", "Unknown"].includes(status)) {
       status = "Alive";
@@ -264,7 +277,8 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
 
   const rawRelationships = Array.isArray(raw.relationships) ? raw.relationships : [];
   const relationships = rawRelationships
-    .map((r: any) => {
+    .map((item: unknown) => {
+      const r = asRecord(item);
       const targetName = String(r.targetName || r.name || r.character || r.relatedCharacter || "").trim();
       let relationType = String(r.relationType || r.type || r.relation || "Ally").trim();
       if (relationType.toLowerCase() === "connected" || relationType.toLowerCase() === "related") {
@@ -283,11 +297,12 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
         isSensitive: typeof r.isSensitive === "boolean" ? r.isSensitive : false,
       };
     })
-    .filter((r: any) => r.targetName.length > 0);
+    .filter((r) => r.targetName.length > 0);
 
   const rawFactions = Array.isArray(raw.factions) ? raw.factions : [];
   const factions = rawFactions
-    .map((f: any) => {
+    .map((item: unknown) => {
+      const f = asRecord(item);
       const factionName = String(f.factionName || f.name || f.faction || "").trim();
       const validFrom = parseChapterInt(f.validFrom, introducedAtChapter);
       let validUntil = parseChapterIntOrNull(f.validUntil);
@@ -301,7 +316,7 @@ export function normalizeGeminiOutput(raw: any, totalChapters: number): GeminiPa
         isSensitive: typeof f.isSensitive === "boolean" ? f.isSensitive : false,
       };
     })
-    .filter((f: any) => f.factionName.length > 0);
+    .filter((f) => f.factionName.length > 0);
 
   return {
     introducedAtChapter,
@@ -395,7 +410,7 @@ Extract all relationships mentioned in the wikitext, infobox, or history.`;
 
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || "{}";
-      let parsed: any;
+      let parsed: unknown;
       try {
         parsed = JSON.parse(content);
       } catch {
@@ -456,19 +471,19 @@ async function parseWithGoogleGenAI(
         const normalized = normalizeGeminiOutput(parsed, totalChapters);
         console.log(`[${label}] Berhasil: ${characterName} (${normalized.descriptions.length} desc phases, ${normalized.relationships.length} relations)`);
         return normalized;
-      } catch (err: any) {
-        console.warn(`[${label}] Model ${model} attempt ${attempt} gagal: ${err.message || String(err)}`);
+      } catch (err: unknown) {
+        const msg = errMsg(err);
+        console.warn(`[${label}] Model ${model} attempt ${attempt} gagal: ${msg}`);
         lastErr = err;
-        if (err?.message?.includes("timeout") || err?.message?.includes("ETIMEDOUT")) {
+        if (msg.includes("timeout") || msg.includes("ETIMEDOUT")) {
           console.log(`[${label}] Koneksi Gemini timeout / tidak merespons. Beralih ke provider cadangan (Groq/OpenRouter)...`);
           connectionHangs = true;
           break;
         }
         if (
-          err?.message?.includes("Quota exceeded") ||
-          err?.message?.includes("RESOURCE_EXHAUSTED") ||
-          err?.message?.includes("429") ||
-          String(err).includes("429")
+          msg.includes("Quota exceeded") ||
+          msg.includes("RESOURCE_EXHAUSTED") ||
+          msg.includes("429")
         ) {
           console.log(`[${label}-Quota] Kuota Gemini habis (429/RESOURCE_EXHAUSTED). Beralih ke provider cadangan (Groq/OpenRouter)...`);
           connectionHangs = true;
@@ -558,7 +573,7 @@ ${wikitext}`;
     const models = getGeminiModels();
     try {
       return await parseWithGoogleGenAI(ai, models, characterName, userPrompt, totalChapters, "Gemini");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn(`[Gemini] Semua model Gemini utama gagal. Beralih ke fallback...`);
       lastError = err;
     }
@@ -570,8 +585,8 @@ ${wikitext}`;
     console.log(`[LLM-Fallback] Mengalihkan ke Groq (${groqModels.join(" -> ")})...`);
     try {
       return await parseCharacterWithGroq(wikitext, characterName, chapterNumberingSource, totalChapters);
-    } catch (groqErr: any) {
-      console.warn(`[Groq-Fallback] Gagal memproses dengan Groq: ${groqErr.message}`);
+    } catch (groqErr: unknown) {
+      console.warn(`[Groq-Fallback] Gagal memproses dengan Groq: ${errMsg(groqErr)}`);
       lastError = groqErr;
     }
   }
@@ -585,8 +600,8 @@ ${wikitext}`;
     console.log(`[LLM-Fallback] Mengalihkan ke OpenRouter (${openrouterModels.join(" -> ")})...`);
     try {
       return await parseWithOpenRouter(openrouterModels, openrouterApiKey, characterName, userPrompt, totalChapters);
-    } catch (openrouterErr: any) {
-      console.warn(`[OpenRouter-Fallback] Gagal memproses dengan OpenRouter: ${openrouterErr.message}`);
+    } catch (openrouterErr: unknown) {
+      console.warn(`[OpenRouter-Fallback] Gagal memproses dengan OpenRouter: ${errMsg(openrouterErr)}`);
       lastError = openrouterErr;
     }
   }
@@ -599,8 +614,8 @@ ${wikitext}`;
     console.log(`[LLM-Fallback] Mengalihkan ke Gemini Gemma (${gemmaModels.join(" -> ")})...`);
     try {
       return await parseWithGoogleGenAI(ai, gemmaModels, characterName, userPrompt, totalChapters, "Gemini-Gemma");
-    } catch (gemmaErr: any) {
-      console.warn(`[Gemma-Fallback] Gagal memproses dengan Gemini Gemma: ${gemmaErr.message}`);
+    } catch (gemmaErr: unknown) {
+      console.warn(`[Gemma-Fallback] Gagal memproses dengan Gemini Gemma: ${errMsg(gemmaErr)}`);
       lastError = gemmaErr;
     }
   } else if (ai && (!groqApiKey || !openrouterApiKey)) {

@@ -17,6 +17,7 @@
  *   --dry-run              Preview only: fetch wikitext, parse, log results without DB writes
  */
 
+import type { Prisma } from "../src/generated/prisma/client";
 import { prisma } from "../src/lib/prisma";
 import { fetchMediaDetail, mediaTitleForms } from "../src/lib/anilist";
 import {
@@ -202,8 +203,9 @@ async function enrichMedia(
   try {
     anilistDetail = await fetchMediaDetail(media.anilistId);
     console.log(`[AniList] ${anilistDetail.characters.length} characters from AniList`);
-  } catch (err: any) {
-    console.warn(`[WARN] AniList fetch failed: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[WARN] AniList fetch failed: ${msg}`);
   }
 
   // Merge AniList characters into DB characters for better resolution
@@ -256,8 +258,9 @@ async function enrichMedia(
     let wikitextResult: { title: string; wikitext: string } | null = null;
     try {
       wikitextResult = await fetchCharacterWikitextSmart(wikiSubdomain, charName, dbChar?.aliases || []);
-    } catch (err: any) {
-      console.warn(`[WARN] Fandom fetch failed for ${charName}: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[WARN] Fandom fetch failed for ${charName}: ${msg}`);
     }
 
     if (!wikitextResult || wikitextResult.wikitext.length < 500) {
@@ -280,8 +283,9 @@ async function enrichMedia(
         media.totalChapters
       );
       console.log(`[Gemini] Parsed: introCh=${parsed.introducedAtChapter}, desc=${parsed.descriptions?.length || 0}, status=${parsed.statuses?.length || 0}, rels=${parsed.relationships?.length || 0}, facs=${parsed.factions?.length || 0}`);
-    } catch (err: any) {
-      console.error(`[ERROR] Gemini parsing failed for ${charName}: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[ERROR] Gemini parsing failed for ${charName}: ${msg}`);
       failed++;
       continue;
     }
@@ -332,7 +336,7 @@ async function enrichMedia(
         where: { id: existingDraft.id },
         data: {
           rawWikitext: cleanedWikitext,
-          parsedJson: parsed as any,
+          parsedJson: parsed as unknown as Prisma.InputJsonValue,
           status,
           unresolvedNames: [...new Set(unresolvedNames)],
         },
@@ -344,7 +348,7 @@ async function enrichMedia(
           mediaId: media.id,
           characterName: charName,
           rawWikitext: cleanedWikitext,
-          parsedJson: parsed as any,
+          parsedJson: parsed as unknown as Prisma.InputJsonValue,
           status,
           unresolvedNames: [...new Set(unresolvedNames)],
         },

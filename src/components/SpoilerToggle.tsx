@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 interface Props {
   /** Content to show/hide. */
@@ -28,13 +28,10 @@ export default function SpoilerToggle({
   placeholder = "Spoiler — tap to reveal",
   className = "",
 }: Props) {
-  const [revealed, setRevealed] = useState(false);
+  // Reset automatically whenever resetKey changes (PRD 4.B) without an effect.
+  const [revealedKey, setRevealedKey] = useState<number | null>(null);
+  const revealed = revealedKey === resetKey;
   const displayContent = content ?? children;
-
-  // Reset on chapter change (PRD 4.B: reveal-state reset every chapter change)
-  useEffect(() => {
-    setRevealed(false);
-  }, [resetKey]);
 
   if (!isSensitive) {
     return <span className={className}>{displayContent}</span>;
@@ -44,7 +41,7 @@ export default function SpoilerToggle({
     return (
       <button
         type="button"
-        onClick={() => setRevealed(false)}
+        onClick={() => setRevealedKey(null)}
         className={`inline-flex items-center gap-1.5 text-left cursor-pointer text-amber-300 hover:text-amber-200 transition ${className}`}
       >
         <span>{displayContent}</span>
@@ -56,7 +53,7 @@ export default function SpoilerToggle({
   return (
     <button
       type="button"
-      onClick={() => setRevealed(true)}
+      onClick={() => setRevealedKey(resetKey)}
       className={`inline-flex items-center gap-1 text-slate-400 hover:text-purple-300 font-medium text-xs italic cursor-pointer transition ${className}`}
     >
       <span>{placeholder}</span>

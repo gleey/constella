@@ -45,7 +45,7 @@ export interface MangaDexInfo {
 }
 
 /** MediaWiki-style IPv4-forced JSON fetch (api.mangadex.org hangs on IPv6 here). */
-function fetchJsonIPv4(url: string): Promise<any | null> {
+function fetchJsonIPv4<T = unknown>(url: string): Promise<T | null> {
   return new Promise((resolve) => {
     const u = new URL(url);
     const req = https.request(
@@ -68,7 +68,7 @@ function fetchJsonIPv4(url: string): Promise<any | null> {
             return;
           }
           try {
-            resolve(JSON.parse(body));
+            resolve(JSON.parse(body) as T);
           } catch {
             resolve(null);
           }
@@ -184,11 +184,11 @@ function parseLastChapter(raw: unknown): number | null {
  * count of rows.
  */
 async function fetchMaxChapterNumber(mangaId: string): Promise<number | null> {
-  const json = await fetchJsonIPv4(
+  const json = await fetchJsonIPv4<{ data?: Array<{ attributes?: { chapter?: string } }> }>(
     `${MANGADEX_API}/manga/${mangaId}/feed?limit=100&order%5Bchapter%5D=desc` +
       `&translatedLanguage%5B%5D=en&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic`,
   );
-  const rows: Array<{ attributes?: { chapter?: string } }> = json?.data ?? [];
+  const rows = json?.data ?? [];
   let max = 0;
   for (const row of rows) {
     const n = Number.parseFloat(row?.attributes?.chapter ?? "");
@@ -220,7 +220,7 @@ export async function findMangaDexInfo(
   // primary title keeps priority over romaji/synonym forms.
   const responses = await Promise.all(
     forms.slice(0, 3).map((form) =>
-      fetchJsonIPv4(
+      fetchJsonIPv4<{ data?: MangaDexEntry[] }>(
         `${MANGADEX_API}/manga?title=${encodeURIComponent(form)}&limit=8` +
           `&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica`,
       ),

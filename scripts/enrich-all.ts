@@ -15,7 +15,7 @@ import { fetchMediaDetail } from "../src/lib/anilist";
 import { fetchCharacterWikitextSmart, cleanWikitextForLLM } from "../src/lib/fandom";
 import { fetchAltCharacterText, fetchAltCharacterRoster } from "../src/lib/alt-sources";
 import { parseCharacterWikitext, type GeminiParsedCharacter, getGeminiModels, normalizeGeminiOutput } from "../src/lib/gemini";
-import { resolveCharacterName, resolveFactionName } from "../src/lib/name-resolution";
+import { resolveCharacterName } from "../src/lib/name-resolution";
 import { validateTemporalBounds } from "../src/lib/temporal";
 import { GoogleGenAI } from "@google/genai";
 import { FACTION_COLORS, hashString, buildSeriesConfigs, type SeriesMapping } from "./series-config";
@@ -72,9 +72,10 @@ REQUIREMENTS:
         const text = (res.text ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
         const parsed = JSON.parse(text);
         return normalizeGeminiOutput(parsed, totalChapters);
-      } catch (err: any) {
-        console.warn(`[Gemini-Synth] Model ${model} gagal: ${err.message || String(err)}. Lanjut ke model berikut...`);
-        if (err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED")) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[Gemini-Synth] Model ${model} gagal: ${msg}. Lanjut ke model berikut...`);
+        if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
           await new Promise((r) => setTimeout(r, 2000));
         }
       }
@@ -121,8 +122,9 @@ REQUIREMENTS:
         }
 
         console.warn(`[Groq-Synth] Model ${groqModel} gagal (HTTP ${groqRes.status}). Lanjut ke model berikut...`);
-      } catch (e: any) {
-        console.warn(`[Groq-Synth] Model ${groqModel} error: ${e.message || String(e)}. Lanjut ke model berikut...`);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`[Groq-Synth] Model ${groqModel} error: ${msg}. Lanjut ke model berikut...`);
       }
     }
   }
@@ -184,8 +186,9 @@ export async function enrichMedia(config: SeriesMapping, options: EnrichOptions 
         });
       }
     }
-  } catch (err: any) {
-    console.warn(`[AniList-WARN] Gagal mengambil karakter AniList (${err.message}). Melanjutkan dengan karakter di database.`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[AniList-WARN] Gagal mengambil karakter AniList (${msg}). Melanjutkan dengan karakter di database.`);
   }
 
   // Reload all characters in media
@@ -272,8 +275,9 @@ export async function enrichMedia(config: SeriesMapping, options: EnrichOptions 
       } else {
         console.log(`[Fandom] Wikitext untuk ${charName} tidak ditemukan atau terlalu pendek.`);
       }
-    } catch (err: any) {
-      console.warn(`[WARN] Gagal mengambil/memproses Fandom wikitext untuk ${charName}: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[WARN] Gagal mengambil/memproses Fandom wikitext untuk ${charName}: ${msg}`);
     }
 
     // A2. Fallback sources (Wikipedia / Kitsu) when there is no Fandom wiki or
@@ -307,8 +311,9 @@ export async function enrichMedia(config: SeriesMapping, options: EnrichOptions 
       try {
         console.log(`[Gemini] Menggunakan ekstraksi lore terarah untuk ${charName}...`);
         parsed = await synthesizeLoreViaGemini(charName, media.title, media.totalChapters, allNamesList);
-      } catch (err: any) {
-        console.error(`[ERROR] Gagal sintesis lore untuk ${charName}: ${err.message}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[ERROR] Gagal sintesis lore untuk ${charName}: ${msg}`);
         continue;
       }
     }
@@ -339,7 +344,7 @@ export async function enrichMedia(config: SeriesMapping, options: EnrichOptions 
               isSensitive: Boolean(desc.isSensitive),
             },
           });
-        } catch (e) {
+        } catch {
           // ignore temporal validation formatting quirk
         }
       }
@@ -363,7 +368,7 @@ export async function enrichMedia(config: SeriesMapping, options: EnrichOptions 
               isSensitive: Boolean(st.isSensitive),
             },
           });
-        } catch (e) {}
+        } catch {}
       }
       console.log(`[DB] ${parsed.statuses.length} status disimpan untuk ${dbChar.name}.`);
     }
@@ -447,7 +452,7 @@ export async function enrichMedia(config: SeriesMapping, options: EnrichOptions 
             },
           });
           relCount++;
-        } catch (e) {}
+        } catch {}
       }
       console.log(`[DB] ${relCount} relasi tersambung disimpan untuk ${dbChar.name}.`);
     }

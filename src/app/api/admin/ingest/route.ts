@@ -116,8 +116,9 @@ export async function POST(req: NextRequest) {
             });
           }
         }
-      } catch (e: any) {
-        console.warn(`[Admin Ingest] Failed to fetch Fandom category characters: ${e.message}`);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`[Admin Ingest] Failed to fetch Fandom category characters: ${msg}`);
       }
     }
 

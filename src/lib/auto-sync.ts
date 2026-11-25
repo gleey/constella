@@ -145,8 +145,9 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
               });
             }
           }
-        } catch (e: any) {
-          console.warn(`[AutoSync] Could not fetch fandom characters for ${detail.title}: ${e.message}`);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn(`[AutoSync] Could not fetch fandom characters for ${detail.title}: ${msg}`);
         }
       }
       characterCandidates = characterCandidates.filter((c) => c.name.length > 0);
@@ -277,8 +278,9 @@ export async function syncPopularMedia(limit = 12): Promise<{ count: number; med
         coverImage: media.coverImage,
         charactersSynced: syncedCharCount,
       });
-    } catch (err: any) {
-      console.error(`[AutoSync] Error syncing media "${item.title}":`, err.message);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[AutoSync] Error syncing media "${item.title}":`, msg);
     }
   }
 
