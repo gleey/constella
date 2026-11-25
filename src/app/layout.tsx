@@ -18,6 +18,19 @@ export const metadata: Metadata = {
   title: "Constella — Zero-Spoiler Character Map",
   description:
     "Explore manga & manhwa character relationships chapter by chapter, without spoilers",
+  openGraph: {
+    title: "Constella — Zero-Spoiler Character Map",
+    description:
+      "Explore manga & manhwa character relationships chapter by chapter, without spoilers",
+    type: "website",
+    siteName: "Constella",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Constella — Zero-Spoiler Character Map",
+    description:
+      "Explore manga & manhwa character relationships chapter by chapter, without spoilers",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

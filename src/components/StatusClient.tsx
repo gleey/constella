@@ -41,6 +41,13 @@ const TIER_BADGE_STYLE = {
   tier1: "bg-slate-500/15 text-slate-300 border-slate-500/30",
 } as const;
 
+const TIER_FILTER_ACTIVE = {
+  all: "bg-indigo-600 text-white ring-1 ring-indigo-500/40",
+  tier3: "bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40",
+  tier2: "bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40",
+  tier1: "bg-slate-500/20 text-slate-300 ring-1 ring-slate-500/40",
+} as const;
+
 const PAGE_SIZE = 24;
 
 export default function StatusClient({ initialMedia }: StatusClientProps) {
@@ -85,9 +92,7 @@ export default function StatusClient({ initialMedia }: StatusClientProps) {
               onClick={() => handleFilterChange(f as typeof filter)}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
                 filter === f
-                  ? f === "all"
-                    ? "bg-indigo-600 text-white ring-1 ring-indigo-500/40"
-                    : `bg-${({ tier3: "emerald", tier2: "amber", tier1: "slate" } as const)[f]}-500/20 text-${({ tier3: "emerald", tier2: "amber", tier1: "slate" } as const)[f]}-300 ring-1 ring-${({ tier3: "emerald", tier2: "amber", tier1: "slate" } as const)[f]}-500/40`
+                  ? TIER_FILTER_ACTIVE[f as keyof typeof TIER_FILTER_ACTIVE]
                   : "bg-white/5 hover:bg-white/10 text-slate-300 ring-1 ring-white/10"
               }`}
             >

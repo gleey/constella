@@ -3,7 +3,7 @@ import Link from "next/link";
 import StatusClient from "@/components/StatusClient";
 import { getBackgroundSyncStatus } from "@/lib/background-sync";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export const metadata = {
   title: "Catalog & Lore Coverage — Constella",

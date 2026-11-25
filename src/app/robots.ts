@@ -7,6 +7,8 @@ export default function robots(): MetadataRoute.Robots {
     disallow.push(`/${adminPath}`);
   }
 
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || "").trim().replace(/\/+$/, "");
+
   return {
     rules: [
       {
@@ -15,5 +17,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow,
       },
     ],
+    ...(siteUrl ? { sitemap: `${siteUrl}/sitemap.xml` } : {}),
   };
 }
