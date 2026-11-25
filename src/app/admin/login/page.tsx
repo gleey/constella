@@ -30,7 +30,11 @@ function AdminLoginForm() {
       // path or a deep admin link), defaulting to the admin root. Only allow
       // same-origin relative paths to avoid open-redirect.
       const next = searchParams.get("next");
-      const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/admin";
+      const defaultBase =
+        typeof window !== "undefined"
+          ? window.location.pathname.replace(/\/login\/?$/, "") || "/admin"
+          : "/admin";
+      const target = next && next.startsWith("/") && !next.startsWith("//") ? next : defaultBase;
       router.push(target);
       router.refresh();
     } catch {
@@ -45,7 +49,7 @@ function AdminLoginForm() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-white tracking-tight">Admin Login</h1>
-          <p className="text-slate-400 text-sm mt-2">Masuk untuk mengelola SpoilerFreeMap</p>
+          <p className="text-slate-400 text-sm mt-2">Masuk untuk mengelola Constella</p>
         </div>
 
         <form

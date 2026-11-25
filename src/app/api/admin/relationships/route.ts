@@ -70,6 +70,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error("Create relationship error:", err);
+    return NextResponse.json({ error: "Failed to create relationship" }, { status: 500 });
   }
 }

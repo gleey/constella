@@ -86,91 +86,105 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
     throw err;
   }
 
-  // Update character's introducedAtChapter — nilai dari parse LLM, terverifikasi.
-  await prisma.character.update({
-    where: { id: character.id },
-    data: { introducedAtChapter: parsed.introducedAtChapter, debutKnown: true },
-  });
-
-  // Write descriptions
-  if (parsed.descriptions.length > 0) {
-    await prisma.characterDescription.createMany({
-      data: parsed.descriptions.map((d) => ({
-        characterId: character.id,
-        text: d.text,
-        validFrom: d.validFrom,
-        validUntil: d.validUntil,
-        isSensitive: d.isSensitive,
-      })),
-    });
-  }
-
-  // Write statuses
-  if (parsed.statuses.length > 0) {
-    await prisma.characterStatus.createMany({
-      data: parsed.statuses.map((s) => ({
-        characterId: character.id,
-        status: s.status,
-        validFrom: s.validFrom,
-        validUntil: s.validUntil,
-        isSensitive: s.isSensitive,
-      })),
-    });
-  }
-
-  // Write relationships (resolve names again to get IDs)
-  for (const r of parsed.relationships) {
-    const targetId = resolveCharacterName(r.targetName, allCharacters);
-    if (!targetId) continue; // should not happen — names were resolved already
-
-    await prisma.relationship.create({
-      data: {
-        mediaId: draft.mediaId,
-        sourceCharacterId: character.id,
-        targetCharacterId: targetId,
-        relationType: r.relationType,
-        validFrom: r.validFrom,
-        validUntil: r.validUntil,
-        isSensitive: r.isSensitive,
-      },
-    });
-  }
-
-  // Write faction memberships (upsert factions if needed)
-  for (const f of parsed.factions) {
-    let factionId = resolveFactionName(f.factionName, allFactions);
-
-    if (!factionId) {
-      // Create faction — this happens when Gemini finds factions not yet in DB
-      const newFaction = await prisma.faction.create({
-        data: {
-          mediaId: draft.mediaId,
-          name: f.factionName,
-          introducedAtChapter: f.validFrom,
-        },
+  // Atomic transaction + conditional claim prevents concurrent double-approve.
+  try {
+    await prisma.$transaction(async (tx) => {
+      const claim = await tx.draftIngestion.updateMany({
+        where: { id, reviewedAt: null, status: { not: "REJECTED" } },
+        data: { status: "APPROVED", reviewedAt: new Date() },
       });
-      factionId = newFaction.id;
-    }
+      if (claim.count === 0) {
+        throw new Error("ALREADY_REVIEWED");
+      }
 
-    await prisma.factionMembership.create({
-      data: {
-        factionId,
-        characterId: character.id,
-        validFrom: f.validFrom,
-        validUntil: f.validUntil,
-        isSensitive: f.isSensitive,
-      },
+      // Update character's introducedAtChapter — nilai dari parse LLM, terverifikasi.
+      await tx.character.update({
+        where: { id: character.id },
+        data: { introducedAtChapter: parsed.introducedAtChapter, debutKnown: true },
+      });
+
+      // Write descriptions
+      if (parsed.descriptions.length > 0) {
+        await tx.characterDescription.createMany({
+          data: parsed.descriptions.map((d) => ({
+            characterId: character.id,
+            text: d.text,
+            validFrom: d.validFrom,
+            validUntil: d.validUntil,
+            isSensitive: d.isSensitive,
+          })),
+        });
+      }
+
+      // Write statuses
+      if (parsed.statuses.length > 0) {
+        await tx.characterStatus.createMany({
+          data: parsed.statuses.map((s) => ({
+            characterId: character.id,
+            status: s.status,
+            validFrom: s.validFrom,
+            validUntil: s.validUntil,
+            isSensitive: s.isSensitive,
+          })),
+        });
+      }
+
+      // Write relationships (resolve names again to get IDs)
+      for (const r of parsed.relationships) {
+        const targetId = resolveCharacterName(r.targetName, allCharacters);
+        if (!targetId) continue; // should not happen — names were resolved already
+
+        await tx.relationship.create({
+          data: {
+            mediaId: draft.mediaId,
+            sourceCharacterId: character.id,
+            targetCharacterId: targetId,
+            relationType: r.relationType,
+            validFrom: r.validFrom,
+            validUntil: r.validUntil,
+            isSensitive: r.isSensitive,
+          },
+        });
+      }
+
+      // Write faction memberships (upsert factions if needed)
+      for (const f of parsed.factions) {
+        let factionId = resolveFactionName(f.factionName, allFactions);
+
+        if (!factionId) {
+          // Create faction — this happens when Gemini finds factions not yet in DB
+          const newFaction = await tx.faction.create({
+            data: {
+              mediaId: draft.mediaId,
+              name: f.factionName,
+              introducedAtChapter: f.validFrom,
+            },
+          });
+          factionId = newFaction.id;
+          allFactions.push({ id: newFaction.id, name: newFaction.name });
+        }
+
+        await tx.factionMembership.create({
+          data: {
+            factionId,
+            characterId: character.id,
+            validFrom: f.validFrom,
+            validUntil: f.validUntil,
+            isSensitive: f.isSensitive,
+          },
+        });
+      }
     });
+  } catch (err) {
+    if (err instanceof Error && err.message === "ALREADY_REVIEWED") {
+      return NextResponse.json(
+        { error: "Draft already approved. Reject to prevent duplicate rows." },
+        { status: 409 },
+      );
+    }
+    console.error("Approve draft error:", err);
+    return NextResponse.json({ error: "Failed to approve draft" }, { status: 500 });
   }
-
-  // Mark draft as approved
-  await prisma.draftIngestion.update({
-    where: { id },
-    data: {
-      status: "APPROVED",
-      reviewedAt: new Date(),
-    },
-  });
 
   return NextResponse.json({ success: true, characterId: character.id });
 }

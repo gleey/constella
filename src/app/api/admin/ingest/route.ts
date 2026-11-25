@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchMediaDetail } from "@/lib/anilist";
 import { saveMediaRelations } from "@/lib/media-relations";
-import { fetchCharacterWikitextSmart, fetchFandomCategoryCharacters } from "@/lib/fandom";
+import { fetchCharacterWikitextSmart, fetchFandomCategoryCharacters, isValidWikiTarget } from "@/lib/fandom";
 import { parseCharacterWikitext, type GeminiParsedCharacter } from "@/lib/gemini";
 import { resolveNames, resolveCharacterName, resolveFactionName } from "@/lib/name-resolution";
 import { validateTemporalBounds } from "@/lib/temporal";
@@ -33,19 +33,35 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const parsedAnilistId = Number(anilistId);
+    const parsedTotalChapters = parseInt(String(totalChapters), 10);
+    if (!Number.isInteger(parsedAnilistId) || parsedAnilistId <= 0 || !Number.isInteger(parsedTotalChapters) || parsedTotalChapters <= 0) {
+      return NextResponse.json(
+        { error: "anilistId and totalChapters must be positive integers" },
+        { status: 400 },
+      );
+    }
+
+    if (typeof wikiSubdomain !== "string" || !isValidWikiTarget(wikiSubdomain)) {
+      return NextResponse.json(
+        { error: "Invalid wikiSubdomain format (use alphanumeric/hyphens only)" },
+        { status: 400 },
+      );
+    }
+
     // 1. Fetch from AniList
-    const anilistData = await fetchMediaDetail(anilistId);
+    const anilistData = await fetchMediaDetail(parsedAnilistId);
 
     // 2. Upsert Media
-    let media = await prisma.media.findUnique({ where: { anilistId } });
+    let media = await prisma.media.findUnique({ where: { anilistId: parsedAnilistId } });
     if (!media) {
       media = await prisma.media.create({
         data: {
-          anilistId,
+          anilistId: parsedAnilistId,
           title: anilistData.title,
           type: anilistData.format,
           coverImage: anilistData.coverImage,
-          totalChapters: parseInt(String(totalChapters), 10),
+          totalChapters: parsedTotalChapters,
           chapterNumberingSource,
           countryOfOrigin: anilistData.countryOfOrigin,
         },
@@ -181,7 +197,7 @@ export async function POST(req: NextRequest) {
           wikiResult.wikitext,
           character.name,
           chapterNumberingSource,
-          parseInt(String(totalChapters), 10),
+          parsedTotalChapters,
         );
       } catch (err) {
         results.push({ characterName: character.name, status: `GEMINI_ERROR: ${err}`, draftId: "" });
@@ -310,6 +326,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ mediaId: media.id, results });
   } catch (err) {
     console.error("Ingest error:", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return NextResponse.json({ error: "Ingestion failed" }, { status: 500 });
   }
 }

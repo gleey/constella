@@ -26,6 +26,15 @@ export function parseWikiTarget(target: string): { subdomain: string; pageTitle?
 }
 
 /**
+ * Validate a wiki target (`subdomain` or `subdomain#Page_Title`) so it can never
+ * inject arbitrary hostnames, ports, paths, or credentials into the Fandom URL.
+ */
+export function isValidWikiTarget(target: string): boolean {
+  const { subdomain } = parseWikiTarget(target);
+  return /^[a-z0-9-]+$/i.test(subdomain);
+}
+
+/**
  * Build Fandom wiki API URL for a given wiki subdomain or target.
  * Strips any `#pageTitle` so it queries the base endpoint,
  * e.g., "solo-leveling" → "https://solo-leveling.fandom.com/api.php"
@@ -33,6 +42,9 @@ export function parseWikiTarget(target: string): { subdomain: string; pageTitle?
  */
 function apiUrl(wikiSubdomain: string): string {
   const { subdomain } = parseWikiTarget(wikiSubdomain);
+  if (!/^[a-z0-9-]+$/i.test(subdomain)) {
+    throw new Error(`Invalid Fandom wiki subdomain: "${subdomain}"`);
+  }
   return `https://${subdomain}.fandom.com${FANDOM_API_PATH}`;
 }
 

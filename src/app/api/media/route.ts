@@ -19,5 +19,9 @@ export async function GET() {
     },
     orderBy: { title: "asc" },
   });
-  return NextResponse.json(media);
+  return NextResponse.json(media, {
+    headers: {
+      "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+    },
+  });
 }

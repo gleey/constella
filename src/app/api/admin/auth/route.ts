@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { signAdminCookie, getAdminSecret } from "@/lib/admin-auth";
+import { signAdminCookie, getAdminSecret, checkAdminAuth, safeEqualSecret } from "@/lib/admin-auth";
 import { verifyAdminPassword } from "@/lib/admin-password";
 import { checkRateLimit } from "@/lib/rate-limit";
 
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
 
   // Form 2: legacy raw token (scripts, curl)
   const token = String(body?.token ?? "").trim();
-  if (token && token === secret) {
+  if (token && safeEqualSecret(token, secret)) {
     return issueCookie();
   }
 
@@ -93,4 +93,23 @@ export async function POST(req: NextRequest) {
     { error: "Unauthorized: kredensial admin tidak valid." },
     { status: 401 },
   );
+}
+
+/** GET /api/admin/auth — check whether the caller holds a valid admin session. */
+export async function GET(req: NextRequest) {
+  const auth = checkAdminAuth(req);
+  return NextResponse.json({ authenticated: auth.authorized });
+}
+
+/** DELETE /api/admin/auth — clear the admin session cookie (logout). */
+export async function DELETE() {
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set("admin_token", "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+  return res;
 }

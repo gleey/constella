@@ -16,6 +16,29 @@ const nextConfig: NextConfig = {
   // Hide the dev-only route indicator: it overlaps the graph controls and has
   // no value for remote testing. Compile/runtime errors are still surfaced.
   devIndicators: false,
+  async headers() {
+    const securityHeaders = [
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+      { key: "X-DNS-Prefetch-Control", value: "off" },
+    ];
+    const rules = [
+      { source: "/:path*", headers: securityHeaders },
+      {
+        source: "/admin/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
+    ];
+    if (adminPath && adminPath !== "admin") {
+      rules.push({
+        source: `/${adminPath}/:path*`,
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      });
+    }
+    return rules;
+  },
   async rewrites() {
     if (!adminPath || adminPath === "admin") return [];
     return [

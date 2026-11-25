@@ -37,9 +37,9 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith(`/${adminPath}/`);
 
   if (isAdminPage) {
-    // Hide the default /admin surface when a custom path is configured, except
-    // for its login page (kept so redirects always have a stable target).
-    if (adminPath !== "admin" && pathname.startsWith("/admin") && pathname !== "/admin/login") {
+    // Hide the default /admin surface (including /admin/login) when a custom
+    // path is configured so scanners probing /admin* get 404.
+    if (adminPath !== "admin" && pathname.startsWith("/admin")) {
       return new NextResponse(null, { status: 404 });
     }
 
@@ -51,7 +51,7 @@ export async function middleware(request: NextRequest) {
       const valid =
         cookieToken &&
         secret &&
-        (cookieToken === secret || (await verifySignedCookie(secret, cookieToken)));
+        (safeEqual(cookieToken, secret) || (await verifySignedCookie(secret, cookieToken)));
       if (!valid) {
         const loginUrl = new URL(`/${adminPath}/login`, request.url);
         // Preserve where the user was heading so we can return after login.
@@ -100,8 +100,8 @@ export async function middleware(request: NextRequest) {
 
     // Accept the raw secret (scripts, curl) or a signed session cookie (UI).
     const isValid =
-      token === secret ||
-      (cookieToken === token && (await verifySignedCookie(secret, cookieToken)));
+      safeEqual(token, secret) ||
+      (cookieToken ? safeEqual(cookieToken, token) && (await verifySignedCookie(secret, cookieToken)) : false);
     if (!isValid) {
       return NextResponse.json(
         { error: "Unauthorized: Missing or invalid admin token." },
@@ -111,6 +111,17 @@ export async function middleware(request: NextRequest) {
   }
 
   return NextResponse.next();
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const ba = new TextEncoder().encode(a);
+  const bb = new TextEncoder().encode(b);
+  const len = Math.max(ba.length, bb.length);
+  let diff = ba.length ^ bb.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (ba[i] ?? 0) ^ (bb[i] ?? 0);
+  }
+  return diff === 0;
 }
 
 /**
@@ -139,7 +150,7 @@ async function verifySignedCookie(secret: string, value: string): Promise<boolea
   const expected = Array.from(new Uint8Array(mac))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return sig.toLowerCase() === expected;
+  return safeEqual(sig.toLowerCase(), expected);
 }
 
 export const config = {

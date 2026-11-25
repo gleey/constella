@@ -5,6 +5,13 @@ export function getAdminSecret(): string {
   return process.env.ADMIN_SECRET || process.env.ADMIN_TOKEN || "";
 }
 
+/** Constant-time secret comparison via SHA-256 digests (length-independent). */
+export function safeEqualSecret(a: string, b: string): boolean {
+  const ha = crypto.createHash("sha256").update(a).digest();
+  const hb = crypto.createHash("sha256").update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
 /** Cookie session lifetime: 30 days, mirrored by the client-side setter. */
 const COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const COOKIE_TTL_MS = COOKIE_TTL_SECONDS * 1000;
@@ -69,7 +76,7 @@ export function checkAdminAuth(req: NextRequest): { authorized: boolean; error?:
 
   // 1. Header x-admin-token
   const headerToken = req.headers.get("x-admin-token");
-  if (headerToken && headerToken === secret) {
+  if (headerToken && safeEqualSecret(headerToken, secret)) {
     return { authorized: true };
   }
 
@@ -77,7 +84,7 @@ export function checkAdminAuth(req: NextRequest): { authorized: boolean; error?:
   const authHeader = req.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
     const bearer = authHeader.substring(7).trim();
-    if (bearer === secret) {
+    if (safeEqualSecret(bearer, secret)) {
       return { authorized: true };
     }
   }
@@ -85,7 +92,7 @@ export function checkAdminAuth(req: NextRequest): { authorized: boolean; error?:
   // 3 & 4. Cookie admin_token — raw secret (legacy) or signed session.
   const cookieToken = req.cookies.get("admin_token")?.value;
   if (cookieToken) {
-    if (cookieToken === secret) return { authorized: true };
+    if (safeEqualSecret(cookieToken, secret)) return { authorized: true };
     if (verifyAdminCookie(secret, cookieToken)) return { authorized: true };
   }
 

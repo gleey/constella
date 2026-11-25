@@ -9,11 +9,14 @@ import Link from "next/link";
  * lives under that same surface, so derive it from the current pathname
  * instead of hardcoding /admin/login.
  */
-function adminLoginHref(): string {
-  if (typeof window === "undefined") return "/admin/login";
+function adminBasePath(): string {
+  if (typeof window === "undefined") return "/admin";
   const segs = window.location.pathname.split("/").filter(Boolean);
-  const base = segs.length > 0 ? `/${segs[0]}` : "/admin";
-  return `${base}/login`;
+  return segs.length > 0 ? `/${segs[0]}` : "/admin";
+}
+
+function adminLoginHref(): string {
+  return `${adminBasePath()}/login`;
 }
 
 interface MediaItem {
@@ -162,16 +165,32 @@ export default function AdminPage() {
   const [showTokenInput, setShowTokenInput] = useState<boolean>(false);
 
   useEffect(() => {
-    // The session cookie is httpOnly — JS cannot read it. We only probe for a
-    // legacy readable cookie / localStorage token so the UI can decide whether
-    // to show the login prompt; actual authorization is enforced server-side.
-    const match = document.cookie.match(/(?:^|;\s*)admin_token=([^;]+)/);
-    const legacy = match ? decodeURIComponent(match[1]) : (typeof window !== "undefined" ? localStorage.getItem("admin_token") : "") || "";
-    if (!legacy) {
-      setIsTokenSet(false);
-      setShowTokenInput(true);
-    }
+    let active = true;
+    fetch("/api/admin/auth")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!active) return;
+        const authed = Boolean(data?.authenticated);
+        setIsTokenSet(authed);
+        setShowTokenInput(!authed);
+      })
+      .catch(() => {
+        if (!active) return;
+        setIsTokenSet(false);
+        setShowTokenInput(true);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/auth", { method: "DELETE" });
+    } finally {
+      window.location.href = adminLoginHref();
+    }
+  };
 
   const loadMedia = async () => {
     try {
@@ -675,6 +694,15 @@ export default function AdminPage() {
                 <span className={`w-1.5 h-1.5 rounded-full ${isTokenSet ? "bg-emerald-400" : "bg-amber-400 animate-pulse"}`} />
                 <span>{isTokenSet ? "Session Active" : "Login Admin"}</span>
               </button>
+              {isTokenSet && (
+                <button
+                  onClick={handleLogout}
+                  className="px-3 py-2 rounded-full bg-white/5 hover:bg-rose-500/15 text-slate-300 hover:text-rose-200 text-xs font-medium ring-1 ring-white/10 hover:ring-rose-500/30 transition-colors cursor-pointer"
+                  title="Keluar dari sesi admin"
+                >
+                  Logout
+                </button>
+              )}
               <Link
                 href="/"
                 className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 text-xs sm:text-sm font-medium ring-1 ring-white/10 transition-colors"
@@ -1442,7 +1470,7 @@ export default function AdminPage() {
                     </div>
 
                     <Link
-                      href={`/admin/review`}
+                      href={`${adminBasePath()}/review`}
                       className="px-3 py-1.5 bg-[#818cf8]/15 hover:bg-[#818cf8]/25 text-[#818cf8] border border-[#818cf8]/30 rounded text-xs font-semibold transition-colors"
                     >
                       Open Full Reviewer ↗

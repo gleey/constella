@@ -1,6 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+
+function adminBasePath(): string {
+  if (typeof window === "undefined") return "/admin";
+  const segs = window.location.pathname.split("/").filter(Boolean);
+  return segs.length > 0 ? `/${segs[0]}` : "/admin";
+}
 
 interface SearchResult {
   id: number;
@@ -198,9 +205,9 @@ export default function IngestPage() {
               </span>
             </div>
           ))}
-          <a href="/admin/review" className="inline-block mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+          <Link href={`${adminBasePath()}/review`} className="inline-block mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
             Go to Review
-          </a>
+          </Link>
         </div>
       )}
     </div>

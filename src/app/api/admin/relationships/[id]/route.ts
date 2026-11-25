@@ -49,7 +49,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     return NextResponse.json(updated);
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error("Update relationship error:", err);
+    return NextResponse.json({ error: "Failed to update relationship" }, { status: 500 });
   }
 }
 
@@ -64,6 +65,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
     await prisma.relationship.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error("Delete relationship error:", err);
+    return NextResponse.json({ error: "Failed to delete relationship" }, { status: 500 });
   }
 }
