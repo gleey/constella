@@ -240,13 +240,20 @@ export async function GET(
   }
 
   // ── Response (no temporal metadata per 4.D / 5) ─────────────────────
-  return NextResponse.json({
-    mediaId,
-    chapter,
-    totalChapters: media.totalChapters,
-    factions,
-    nodes,
-    edges,
-    protagonistId: protagonist?.id ?? null,
-  });
+  return NextResponse.json(
+    {
+      mediaId,
+      chapter,
+      totalChapters: media.totalChapters,
+      factions,
+      nodes,
+      edges,
+      protagonistId: protagonist?.id ?? null,
+    },
+    {
+      headers: {
+        "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=300",
+      },
+    },
+  );
 }

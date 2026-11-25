@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/admin-auth";
 import {
   DEFAULT_ABOUT_CONTENT,
   DEFAULT_METHODOLOGY_CONTENT,
@@ -34,6 +35,9 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
  * Admin save. Upserts the page content.
  */
 export async function PUT(req: NextRequest, ctx: RouteContext) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
+
   const { slug } = await ctx.params;
   if (!isSitePageSlug(slug)) {
     return NextResponse.json({ error: "Page not found" }, { status: 404 });

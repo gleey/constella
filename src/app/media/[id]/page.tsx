@@ -43,6 +43,7 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
   const mediaId = resolvedParams.id;
 
   const [media, setMedia] = useState<MediaHeader | null>(null);
+  const [notFoundError, setNotFoundError] = useState(false);
   const [chapter, setChapter] = useState(1);
   const [data, setData] = useState<GraphResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,6 +55,10 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
     async function loadMedia() {
       try {
         const res = await fetch(`/api/media/${mediaId}`);
+        if (res.status === 404) {
+          setNotFoundError(true);
+          return;
+        }
         if (!res.ok) return;
         const found: MediaHeader = await res.json();
         setMedia(found);
@@ -224,7 +229,22 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
 
       {/* Main graph viewport */}
       <main className="relative flex-1 w-full h-full overflow-hidden p-3 bg-[#0b0f19] aurora">
-        {loading && !data && (
+        {notFoundError && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0b0f19]/90 text-slate-300 px-4 text-center">
+            <p className="text-lg font-bold text-white">Seri tidak ditemukan</p>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm">
+              ID seri tidak valid atau sudah dihapus dari katalog.
+            </p>
+            <Link
+              href="/#catalog"
+              className="mt-4 px-4 py-2 rounded-full bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-semibold ring-1 ring-indigo-500/40 transition-colors"
+            >
+              Kembali ke Katalog
+            </Link>
+          </div>
+        )}
+
+        {!notFoundError && loading && !data && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0b0f19]/80 backdrop-blur-sm text-slate-300">
             <div className="w-12 h-12 border-4 border-white/10 border-t-indigo-400 rounded-full animate-spin mb-4" />
             <p className="text-sm font-semibold tracking-wide">

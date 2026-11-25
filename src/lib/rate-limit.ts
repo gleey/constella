@@ -26,6 +26,11 @@ export interface RateLimitResult {
  */
 export function checkRateLimit(key: string, limit: number, windowMs: number): RateLimitResult {
   const now = Date.now();
+  if (store.size > 1000) {
+    for (const [k, b] of store) {
+      if (now >= b.resetAt) store.delete(k);
+    }
+  }
   const bucket = store.get(key);
 
   if (!bucket || now >= bucket.resetAt) {

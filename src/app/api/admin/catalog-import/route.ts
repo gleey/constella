@@ -1,8 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { importCatalog, syncOngoingReleases } from "@/lib/catalog-import";
+import { requireAdmin } from "@/lib/admin-auth";
+
+const ALLOWED_STATUSES = new Set(["RELEASING", "FINISHED", "HIATUS", "CANCELLED", "NOT_YET_RELEASED"]);
 
 /** POST /api/admin/catalog-import — bulk-import AniList catalog metadata. */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
+
   let body: {
     countries?: string[];
     maxPages?: number;
@@ -18,13 +24,15 @@ export async function POST(request: Request) {
 
   const countries =
     Array.isArray(body.countries) && body.countries.length > 0
-      ? body.countries.filter((c) => typeof c === "string")
+      ? body.countries.filter((c): c is string => typeof c === "string" && /^[A-Z]{2}$/.test(c))
       : ["KR", "JP"];
   const maxPages =
-    typeof body.maxPages === "number" && body.maxPages > 0
+    typeof body.maxPages === "number" && Number.isFinite(body.maxPages) && body.maxPages > 0
       ? Math.min(20, Math.floor(body.maxPages))
       : 6;
   const perPage = 50;
+  const status =
+    typeof body.status === "string" && ALLOWED_STATUSES.has(body.status) ? body.status : undefined;
 
   try {
     let result;
@@ -35,14 +43,14 @@ export async function POST(request: Request) {
         countries,
         maxPages,
         perPage,
-        status: body.status,
+        status,
       });
     }
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("Catalog import route failed:", error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : String(error) },
+      { ok: false, error: "Catalog import failed" },
       { status: 500 },
     );
   }

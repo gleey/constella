@@ -129,10 +129,10 @@ export default async function StatusPage() {
         {/* Stats Cards */}
         <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { key: "total", label: "Total Seri", value: stats.total, color: "indigo" },
-            { key: "tier3", label: "Tier 3 — Relasi Aktif", value: stats.tier3, color: "emerald" },
-            { key: "tier2", label: "Tier 2 — Karakter Saja", value: stats.tier2, color: "amber" },
-            { key: "tier1", label: "Tier 1 — Metadata Saja", value: stats.tier1, color: "slate" },
+            { key: "total", label: "Total Seri", value: stats.total, dotClass: "bg-indigo-500/60" },
+            { key: "tier3", label: "Tier 3 — Relasi Aktif", value: stats.tier3, dotClass: "bg-emerald-500/60 animate-pulse" },
+            { key: "tier2", label: "Tier 2 — Karakter Saja", value: stats.tier2, dotClass: "bg-amber-500/60 animate-pulse" },
+            { key: "tier1", label: "Tier 1 — Metadata Saja", value: stats.tier1, dotClass: "bg-slate-500/60 animate-pulse" },
           ].map((s) => (
             <div
               key={s.key}
@@ -142,11 +142,7 @@ export default async function StatusPage() {
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                   {s.label}
                 </span>
-                <span
-                  className={`w-2 h-2 rounded-full bg-${s.color}-500/60 ${
-                    s.key !== "total" ? "animate-pulse" : ""
-                  }`}
-                />
+                <span className={`w-2 h-2 rounded-full ${s.dotClass}`} />
               </div>
               <div className="mt-2 text-3xl sm:text-4xl font-bold text-white">{s.value}</div>
             </div>

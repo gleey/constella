@@ -13,10 +13,14 @@ import { prisma } from "@/lib/prisma";
 import { validateTemporalBounds, TemporalValidationError } from "@/lib/temporal";
 import { resolveCharacterName, resolveFactionName } from "@/lib/name-resolution";
 import type { GeminiParsedCharacter } from "@/lib/gemini";
+import { requireAdmin } from "@/lib/admin-auth";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function POST(_req: NextRequest, ctx: RouteContext) {
+export async function POST(req: NextRequest, ctx: RouteContext) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
+
   const { id } = await ctx.params;
 
   const draft = await prisma.draftIngestion.findUnique({ where: { id } });

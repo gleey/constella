@@ -5,8 +5,12 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export async function GET(req: NextRequest) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
+
   const mediaId = new URL(req.url).searchParams.get("mediaId");
   if (!mediaId) return NextResponse.json({ error: "mediaId required" }, { status: 400 });
 

@@ -38,7 +38,13 @@ export default function ReviewPage() {
   const loadDrafts = useCallback(async () => {
     const params = filterStatus ? `?status=${filterStatus}` : "";
     const res = await fetch(`/api/admin/drafts${params}`);
-    setDrafts(await res.json());
+    if (!res.ok) {
+      setDrafts([]);
+      setMessage(res.status === 401 ? "Sesi admin berakhir. Silakan login ulang." : "Gagal memuat draft.");
+      return;
+    }
+    const data = await res.json();
+    setDrafts(Array.isArray(data) ? data : []);
   }, [filterStatus]);
 
   useEffect(() => { loadDrafts(); }, [loadDrafts]);

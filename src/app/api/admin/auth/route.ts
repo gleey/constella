@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (username === expectedUser && verifyAdminPassword(password, passwordHash)) {
+    if (safeEqualSecret(username, expectedUser) && verifyAdminPassword(password, passwordHash)) {
       return issueCookie();
     }
     // Uniform message — never reveal which field was wrong.

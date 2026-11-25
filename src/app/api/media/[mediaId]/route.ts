@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeRelations, relatedMediaIds } from "@/lib/media-relations";
+import { requireAdmin } from "@/lib/admin-auth";
 
 /** GET /api/media/[mediaId] — media header fields + prequel/sequel links. */
 export async function GET(
@@ -36,9 +37,12 @@ export async function GET(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ mediaId: string }> }
 ) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
+
   try {
     const { mediaId } = await params;
 

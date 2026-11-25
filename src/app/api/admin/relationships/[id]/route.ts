@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateTemporalBounds, TemporalValidationError } from "@/lib/temporal";
+import { requireAdmin } from "@/lib/admin-auth";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -9,6 +10,9 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Update an existing relationship (relationType, validFrom, validUntil, isSensitive).
  */
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
+
   const { id } = await ctx.params;
 
   try {
@@ -58,7 +62,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
  * DELETE /api/admin/relationships/[id]
  * Delete a relationship.
  */
-export async function DELETE(_req: NextRequest, ctx: RouteContext) {
+export async function DELETE(req: NextRequest, ctx: RouteContext) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
+
   const { id } = await ctx.params;
 
   try {

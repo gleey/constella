@@ -4,10 +4,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/admin-auth";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function POST(_req: NextRequest, ctx: RouteContext) {
+export async function POST(req: NextRequest, ctx: RouteContext) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
+
   const { id } = await ctx.params;
   const draft = await prisma.draftIngestion.findUnique({ where: { id } });
   if (!draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });

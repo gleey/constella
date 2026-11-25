@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateTemporalBounds, TemporalValidationError } from "@/lib/temporal";
+import { requireAdmin } from "@/lib/admin-auth";
 
 /**
  * GET /api/admin/relationships?mediaId=xxx
  * List all active relationships for a media, with source and target character names.
  */
 export async function GET(req: NextRequest) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
+
   const mediaId = req.nextUrl.searchParams.get("mediaId");
   if (!mediaId) {
     return NextResponse.json({ error: "mediaId is required" }, { status: 400 });
@@ -29,6 +33,9 @@ export async function GET(req: NextRequest) {
  * Create a new relationship directly in the active table.
  */
 export async function POST(req: NextRequest) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
+
   try {
     const body = await req.json();
     const { mediaId, sourceCharacterId, targetCharacterId, relationType, validFrom, validUntil, isSensitive } = body;

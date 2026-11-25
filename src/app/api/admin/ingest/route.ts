@@ -20,8 +20,12 @@ import { resolveNames, resolveCharacterName, resolveFactionName } from "@/lib/na
 import { validateTemporalBounds } from "@/lib/temporal";
 import { shouldMergeCharacters, canonicalizeName } from "@/lib/name-dedupe";
 import { isBrokenImageUrl } from "@/lib/auto-sync";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export async function POST(req: NextRequest) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
+
   try {
     const body = await req.json();
     const { anilistId, chapterNumberingSource, totalChapters, wikiSubdomain, autoPublish } = body;
