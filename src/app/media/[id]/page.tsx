@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useRef, useState, use } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import GraphCanvas from "@/components/GraphCanvas";
@@ -44,55 +44,85 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
 
   const [media, setMedia] = useState<MediaHeader | null>(null);
   const [notFoundError, setNotFoundError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [chapter, setChapter] = useState(1);
   const [data, setData] = useState<GraphResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const graphCacheRef = useRef<Map<number, GraphResponse>>(new Map());
+
+  // Reset client cache when navigating between series
+  useEffect(() => {
+    graphCacheRef.current.clear();
+  }, [mediaId]);
 
   // Fetch media details
   useEffect(() => {
+    const controller = new AbortController();
     async function loadMedia() {
+      setNotFoundError(false);
+      setLoadError(false);
       try {
-        const res = await fetch(`/api/media/${mediaId}`);
+        const res = await fetch(`/api/media/${mediaId}`, { signal: controller.signal });
         if (res.status === 404) {
           setNotFoundError(true);
           return;
         }
-        if (!res.ok) return;
+        if (!res.ok) {
+          setLoadError(true);
+          return;
+        }
         const found: MediaHeader = await res.json();
         setMedia(found);
       } catch (e) {
+        if ((e as { name?: string })?.name === "AbortError") return;
         console.error("Failed to load media info", e);
+        setLoadError(true);
       }
     }
     loadMedia();
+    return () => controller.abort();
   }, [mediaId]);
 
-  // Fetch graph data on chapter change
+  // Fetch graph data on chapter change (with client cache + AbortController)
   useEffect(() => {
-    let cancelled = false;
+    const cached = graphCacheRef.current.get(chapter);
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+      setLoadError(false);
+      setSelectedNodeId((prev) => (prev && !cached.nodes.some((n) => n.id === prev) ? null : prev));
+      return;
+    }
+
+    const controller = new AbortController();
     async function fetchGraph() {
       setLoading(true);
+      setLoadError(false);
       try {
-        const res = await fetch(`/api/media/${mediaId}/graph?chapter=${chapter}`);
+        const res = await fetch(`/api/media/${mediaId}/graph?chapter=${chapter}`, {
+          signal: controller.signal,
+        });
+        if (res.status === 404) {
+          setNotFoundError(true);
+          return;
+        }
         if (!res.ok) throw new Error("Failed to load graph");
         const json: GraphResponse = await res.json();
-        if (!cancelled) {
-          setData(json);
-          // If the currently selected character is not visible at new chapter, unselect
-          setSelectedNodeId((prev) => (prev && !json.nodes.some((n) => n.id === prev) ? null : prev));
-        }
+        graphCacheRef.current.set(chapter, json);
+        setData(json);
+        setSelectedNodeId((prev) => (prev && !json.nodes.some((n) => n.id === prev) ? null : prev));
       } catch (err) {
+        if ((err as { name?: string })?.name === "AbortError") return;
         console.error("Graph fetch error:", err);
+        setLoadError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
     fetchGraph();
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [mediaId, chapter]);
 
   // Keyboard navigation for chapters
@@ -244,7 +274,31 @@ export default function MediaGraphPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
 
-        {!notFoundError && loading && !data && (
+        {!notFoundError && loadError && !data && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0b0f19]/90 text-slate-300 px-4 text-center">
+            <p className="text-lg font-bold text-white">Gagal memuat peta karakter</p>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm">
+              Koneksi ke server terganggu. Coba muat ulang halaman atau kembali ke katalog.
+            </p>
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Muat Ulang
+              </button>
+              <Link
+                href="/#catalog"
+                className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold ring-1 ring-white/10 transition-colors"
+              >
+                Kembali ke Katalog
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {!notFoundError && !loadError && loading && !data && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0b0f19]/80 backdrop-blur-sm text-slate-300">
             <div className="w-12 h-12 border-4 border-white/10 border-t-indigo-400 rounded-full animate-spin mb-4" />
             <p className="text-sm font-semibold tracking-wide">

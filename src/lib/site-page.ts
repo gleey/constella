@@ -21,17 +21,9 @@ The catalog is pulled automatically from AniList. Character lore is enriched fro
 
 Use the chapter slider to travel through the story, click any node to read a bio and its relations, and search for a character even if they have not appeared yet.
 
-Atribusi Sumber Data & Lisensi (Wajib):
-- AniList GraphQL API: Kredit penuh untuk penyediaan metadata judul, sampul resmi, genre, dan informasi status rilis.
-- Fandom Community Wikis: Kredit penuh untuk sumber teks profil karakter, biografi, dan deskripsi arc di bawah lisensi Creative Commons Attribution-ShareAlike (CC-BY-SA 3.0). Penemuan wiki dilakukan melalui layanan pencarian resmi Fandom (services.fandom.com/unified-search).
-- Wikipedia (en.wikipedia.org): Sumber cadangan untuk artikel "List of ... characters" dan bagian karakter pada artikel seri, di bawah lisensi Creative Commons Attribution-ShareAlike 4.0 (CC BY-SA 4.0). Digunakan ketika sebuah seri tidak memiliki wiki Fandom yang memadai.
-- Kitsu API (kitsu.io): Sumber cadangan untuk daftar karakter per media, nama alternatif, potret karakter, dan bio singkat. Digunakan ketika wiki Fandom maupun Wikipedia tidak tersedia. Kitsu juga menjadi sumber status rilis dan verifikasi identitas seri melalui mapping "anilist/manga". Dipakai melalui API publik gratis sesuai Kitsu Terms of Service; Kitsu tidak menyatakan lisensi data formal (database komunitas, backend Apache-2.0).
-- MangaUpdates API (api.mangaupdates.com): Sumber jumlah bab terkini untuk seri yang masih ongoing, ketika AniList tidak menyediakan angka (AniList melaporkan chapters: null untuk seri yang belum tamat). Dipakai melalui API publik sesuai ketentuan MangaUpdates; database-nya dikompilasi oleh kontributor sukarelawan dan tidak menyatakan lisensi data formal.
-- MangaDex API (api.mangadex.org): Cadangan jumlah bab & status rilis ketika MangaUpdates sedang tidak dapat dihubungi (outage). Jumlah bab diambil dari chapter tertinggi yang dirilis scanlation, dengan verifikasi identitas judul yang sama ketatnya. Dipakai melalui API publik gratis sesuai MangaDex ToS.
+All text from fallback sources (Wikipedia and Kitsu) passes through the same AI extraction pipeline as Fandom wikitext, so chapter boundaries are enforced identically. Raw copyrighted prose is never republished — only structured extracted facts are stored.
 
-Semua teks dari sumber cadangan (Wikipedia dan Kitsu) diproses melalui pipeline ekstraksi AI yang sama seperti wikitext Fandom, sehingga batas bab temporal tetap ditegakkan secara identik. Tidak ada konten berhak cipta yang ditampilkan mentah; hanya data terstruktur hasil ekstraksi yang disimpan.
-
-Constella is an independent fan and research project. All artwork and character names belong to their respective creators and publishers.`,
+Constella is an independent fan and research project. All artwork, titles, and character names belong to their respective creators and publishers.`,
 } as const;
 
 export const DEFAULT_METHODOLOGY_CONTENT = {

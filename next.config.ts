@@ -8,7 +8,7 @@ import type { NextConfig } from "next";
  * when a custom path is active.
  *
  * NOTE: obscurity only reduces scanner noise — the real protection is the
- * signed session cookie + admin password enforced by src/middleware.ts.
+ * signed session cookie + admin password enforced by src/proxy.ts.
  */
 const adminPath = (process.env.ADMIN_PATH || "").trim().replace(/^\/+|\/+$/g, "");
 

@@ -37,8 +37,15 @@ export default function IngestPage() {
 
   async function handleSearch() {
     if (!query.trim()) return;
+    setError("");
     const res = await fetch(`/api/admin/anilist/search?q=${encodeURIComponent(query)}`);
-    setResults(await res.json());
+    if (!res.ok) {
+      setResults([]);
+      setError(res.status === 401 ? "Sesi admin berakhir. Silakan login ulang." : "Pencarian AniList gagal.");
+      return;
+    }
+    const data = await res.json();
+    setResults(Array.isArray(data) ? data : []);
   }
 
   function handleSelect(r: SearchResult) {

@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
   const drafts = await prisma.draftIngestion.findMany({
     where,
     orderBy: { createdAt: "desc" },
+    take: 200,
   });
 
   return NextResponse.json(drafts);

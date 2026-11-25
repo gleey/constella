@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { DEFAULT_METHODOLOGY_CONTENT } from "@/lib/site-page";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export const metadata = {
   title: "Methodology & Architecture — Constella",

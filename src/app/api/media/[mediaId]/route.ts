@@ -30,10 +30,17 @@ export async function GET(
   const relations = normalizeRelations(media.relations);
   const targets = await relatedMediaIds(relations);
 
-  return NextResponse.json({
-    ...media,
-    relations: relations.map((r) => ({ ...r, mediaId: targets.get(r.anilistId) ?? null })),
-  });
+  return NextResponse.json(
+    {
+      ...media,
+      relations: relations.map((r) => ({ ...r, mediaId: targets.get(r.anilistId) ?? null })),
+    },
+    {
+      headers: {
+        "Cache-Control": "public, max-age=60, s-maxage=120, stale-while-revalidate=600",
+      },
+    },
+  );
 }
 
 export async function DELETE(

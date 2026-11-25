@@ -49,61 +49,110 @@ export async function GET(
     );
   }
 
-  // ── Layer 1: Factions visible at chapter N ───────────────────────────
-  const factions = await prisma.faction.findMany({
-    where: { mediaId, ...factionVisibleAt(chapter) },
-    select: { id: true, name: true, colorHex: true },
-  });
+  // ── Layer 1: Factions, Characters & All-series degree in parallel ────
+  const [factions, characters, allRelationships] = await Promise.all([
+    prisma.faction.findMany({
+      where: { mediaId, ...factionVisibleAt(chapter) },
+      select: { id: true, name: true, colorHex: true },
+    }),
+    prisma.character.findMany({
+      where: { mediaId, ...characterVisibleAt(chapter) },
+      select: {
+        id: true,
+        name: true,
+        aliases: true,
+        imageUrl: true,
+        introducedAtChapter: true,
+        debutKnown: true,
+        isProtagonist: true,
+      },
+    }),
+    prisma.relationship.findMany({
+      where: { mediaId },
+      select: { sourceCharacterId: true, targetCharacterId: true },
+    }),
+  ]);
 
-  const factionIds = new Set(factions.map((f) => f.id));
-
-  // ── Layer 1: Characters visible at chapter N ─────────────────────────
-  const characters = await prisma.character.findMany({
-    where: { mediaId, ...characterVisibleAt(chapter) },
-    select: {
-      id: true,
-      name: true,
-      aliases: true,
-      imageUrl: true,
-      introducedAtChapter: true,
-      debutKnown: true,
-      isProtagonist: true,
-    },
-  });
-
-  const characterIds = new Set(characters.map((c) => c.id));
-
-  // ── Cross-series reuse ──────────────────────────────────────────────
-  // A character that also appears in a linked series (AniList PREQUEL/SEQUEL)
-  // is one node here, with the earliest debut across both. Names are matched
-  // conservatively (shouldMergeCharacters: canonical-equal, token-reorder, or a
-  // curated transliteration pair) — no fuzzy guessing across series.
-  const relatedChars: {
-    name: string;
-    aliases: string[];
-    introducedAtChapter: number;
-    debutKnown: boolean;
-  }[] = [];
-  const mediaRelations = normalizeRelations(media.relations);
-  const relatedIds = [...(await relatedMediaIds(mediaRelations)).values()];
-  if (relatedIds.length > 0) {
-    relatedChars.push(
-      ...(await prisma.character.findMany({
-        where: { mediaId: { in: relatedIds } },
-        select: { name: true, aliases: true, introducedAtChapter: true, debutKnown: true },
-      })),
+  if (characters.length === 0) {
+    return NextResponse.json(
+      {
+        mediaId,
+        chapter,
+        totalChapters: media.totalChapters,
+        factions,
+        nodes: [],
+        edges: [],
+        protagonistId: null,
+      },
+      {
+        headers: {
+          "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=300",
+        },
+      },
     );
   }
 
+  const factionIds = new Set(factions.map((f) => f.id));
+  const characterIds = new Set(characters.map((c) => c.id));
+  const characterIdList = [...characterIds];
+
+  // ── Cross-series reuse + character details + edges in parallel ───────
+  const mediaRelations = normalizeRelations(media.relations);
+  const relatedIds = [...(await relatedMediaIds(mediaRelations)).values()];
+
+  const [relatedChars, allDescs, allStatuses, allMemberships, relationships] = await Promise.all([
+    relatedIds.length > 0
+      ? prisma.character.findMany({
+          where: { mediaId: { in: relatedIds } },
+          select: { name: true, aliases: true, introducedAtChapter: true, debutKnown: true },
+        })
+      : Promise.resolve([]),
+    prisma.characterDescription.findMany({
+      where: {
+        characterId: { in: characterIdList },
+        ...temporalFilter(chapter),
+      },
+      orderBy: temporalOrderBy,
+      select: { characterId: true, text: true, isSensitive: true },
+    }),
+    prisma.characterStatus.findMany({
+      where: {
+        characterId: { in: characterIdList },
+        ...temporalFilter(chapter),
+      },
+      orderBy: temporalOrderBy,
+      select: { characterId: true, status: true, isSensitive: true },
+    }),
+    factionIds.size > 0
+      ? prisma.factionMembership.findMany({
+          where: {
+            characterId: { in: characterIdList },
+            factionId: { in: [...factionIds] },
+            ...temporalFilter(chapter),
+          },
+          select: { characterId: true, factionId: true, isSensitive: true },
+        })
+      : Promise.resolve([]),
+    prisma.relationship.findMany({
+      where: {
+        mediaId,
+        sourceCharacterId: { in: characterIdList },
+        targetCharacterId: { in: characterIdList },
+        ...temporalFilter(chapter),
+      },
+      select: {
+        id: true,
+        sourceCharacterId: true,
+        targetCharacterId: true,
+        relationType: true,
+        isSensitive: true,
+      },
+    }),
+  ]);
+
   // ── Protagonist: stable for the whole series, never re-derived per chapter ─
-  // A per-chapter "most connected visible node" made the MC flip as the slider
-  // moved (A Stepmother's Märchen: Jeremy at ch1, Shuri at ch2, someone else at
-  // ch100). Degree is therefore counted over ALL relationships of the series,
-  // and an explicit isProtagonist flag (set from AniList's MAIN role) wins.
-  const allRelationships = await prisma.relationship.findMany({
-    where: { mediaId },
-    select: { sourceCharacterId: true, targetCharacterId: true },
-  });
+  // Degree is counted over ALL relationships of the series, and an explicit
+  // isProtagonist flag (set from AniList's MAIN role) wins.
   const degree = new Map<string, number>();
   for (const r of allRelationships) {
     degree.set(r.sourceCharacterId, (degree.get(r.sourceCharacterId) || 0) + 1);
@@ -120,16 +169,6 @@ export async function GET(
     null;
 
   // ── Descriptions: deterministic pick per character ───────────────────
-  // Fetch all matching, group by characterId, take first per ordering.
-  const allDescs = await prisma.characterDescription.findMany({
-    where: {
-      characterId: { in: [...characterIds] },
-      ...temporalFilter(chapter),
-    },
-    orderBy: temporalOrderBy,
-    select: { characterId: true, text: true, isSensitive: true },
-  });
-
   const descByChar = new Map<string, { text: string; isSensitive: boolean }>();
   for (const d of allDescs) {
     if (!descByChar.has(d.characterId)) {
@@ -138,15 +177,6 @@ export async function GET(
   }
 
   // ── Statuses: deterministic pick per character ───────────────────────
-  const allStatuses = await prisma.characterStatus.findMany({
-    where: {
-      characterId: { in: [...characterIds] },
-      ...temporalFilter(chapter),
-    },
-    orderBy: temporalOrderBy,
-    select: { characterId: true, status: true, isSensitive: true },
-  });
-
   const statusByChar = new Map<string, { status: string; isSensitive: boolean }>();
   for (const s of allStatuses) {
     if (!statusByChar.has(s.characterId)) {
@@ -155,16 +185,6 @@ export async function GET(
   }
 
   // ── Faction memberships per character ────────────────────────────────
-  // Only include if faction itself passed filter.
-  const allMemberships = await prisma.factionMembership.findMany({
-    where: {
-      characterId: { in: [...characterIds] },
-      factionId: { in: [...factionIds] },
-      ...temporalFilter(chapter),
-    },
-    select: { characterId: true, factionId: true, isSensitive: true },
-  });
-
   const membershipsByChar = new Map<string, { factionId: string; isSensitive: boolean }[]>();
   for (const m of allMemberships) {
     if (!membershipsByChar.has(m.characterId)) {
@@ -193,24 +213,6 @@ export async function GET(
       description,
       factions,
     };
-  });
-
-  // ── Relationships (edges) — two-sided validation ─────────────────────
-  // Both source AND target must be visible characters.
-  const relationships = await prisma.relationship.findMany({
-    where: {
-      mediaId,
-      sourceCharacterId: { in: [...characterIds] },
-      targetCharacterId: { in: [...characterIds] },
-      ...temporalFilter(chapter),
-    },
-    select: {
-      id: true,
-      sourceCharacterId: true,
-      targetCharacterId: true,
-      relationType: true,
-      isSensitive: true,
-    },
   });
 
   // Dedupe: one line per unordered pair + relation type.

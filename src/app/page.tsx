@@ -405,7 +405,7 @@ export default function HomePage() {
       const j = Math.floor(Math.random() * (i + 1));
       [list[i], list[j]] = [list[j], list[i]];
     }
-    return list;
+    return list.slice(0, 20);
   }, [mediaList]);
 
   // Filter list by Type, Search, Content Rating, and Release Status
@@ -464,9 +464,13 @@ export default function HomePage() {
       : ["Action", "Fantasy", "Murim", "Adventure", "Reincarnation", "Supernatural", "Tower", "Comedy"];
   }, [mediaList]);
 
-  // Featured recommendation series (up to 5 series)
+  // Featured recommendation series (curated titles first, then fallback)
   const recommendedSeries = useMemo(() => {
-    return mediaList.slice(0, 5);
+    const curated = mediaList.filter(
+      (m) => m.contentRating !== "SUGGESTIVE_18" && Boolean(MEDIA_META[m.title]),
+    );
+    const pool = curated.length >= 4 ? curated : mediaList.filter((m) => m.contentRating !== "SUGGESTIVE_18");
+    return pool.slice(0, 4);
   }, [mediaList]);
 
   // Dynamic search suggestions matching title / type / genre

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-auth";
 import {
@@ -68,6 +69,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext) {
       create: { slug, title, content },
     });
 
+    revalidatePath(`/${slug}`);
     return NextResponse.json(page);
   } catch (error) {
     console.error("Error saving page:", error);
